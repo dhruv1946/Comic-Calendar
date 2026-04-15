@@ -1,0 +1,232 @@
+import { encode } from 'base-64';
+import { Link, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../supabase';
+interface Series {
+    id: string;
+    title: string;
+    created_at: string;
+    [key: string]: any;
+}
+
+export default function Home() {
+    const [series, setSeries] = useState<Series[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [nextIssueDates, setNextIssueDates] = useState<Record<string, string>>({});
+
+    const metronUser = 'anon';
+    const metronPass = '***REDACTED_METRON_PASS***';
+
+    useFocusEffect(
+        useCallback(() => {
+            fetchPullList();
+        }, [])
+    );
+    const fetchPullList = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('series')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            if (data) {
+                setSeries(data);
+                // Fetch next issue dates in background
+                fetchNextIssueDates(data);
+            }
+        } catch (error) {
+            console.error('Error fetching series:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const fetchNextIssueDates = async (seriesList: Series[]) => {
+        const headers = {
+            'Authorization': 'Basic ' + encode(`${metronUser}:${metronPass}`),
+        };
+        const today = new Date().toISOString().split('T')[0];
+
+        for (const s of seriesList) {
+            if (!s.metron_id) continue;
+            try {
+                const resp = await fetch(
+                    `https://metron.cloud/api/issue/?series_id=${s.metron_id}&store_date_range_after=${today}&ordering=store_date`,
+                    { headers }
+                );
+                if (!resp.ok) continue;
+                const json = await resp.json();
+                const nextIssue = json.results?.[0];
+                if (nextIssue?.store_date) {
+                    setNextIssueDates((prev) => ({
+                        ...prev,
+                        [s.id]: nextIssue.store_date,
+                    }));
+                }
+            } catch (_e) {
+                // API unreachable, skip
+            }
+        }
+    };
+    const removeSeries = (id: string, title: string) => {
+        Alert.alert(
+            "Remove Comic",
+            `Are you sure you want to drop "${title}" from your Pull List?`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Remove",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            // 1. Delete from Supabase database
+                            const { error } = await supabase
+                                .from('series')
+                                .delete()
+                                .eq('id', id);
+
+                            if (error) throw error;
+
+                            // 2. Instantly remove it from the screen
+                            setSeries((prevSeries) => prevSeries.filter((item) => item.id !== id));
+
+                        } catch (error) {
+                            console.error('Error deleting series:', error);
+                            Alert.alert('Error', 'Could not remove the series from your list.');
+                        }
+                    }
+                }
+            ]
+        );
+    };
+    return (
+        <View style={styles.container}>
+            {loading ? (
+                <ActivityIndicator size="large" color="#ffffff" style={{ marginTop: 50 }} />
+            ) : series.length === 0 ? (
+                <View style={styles.emptyState}>
+                    <Text style={styles.emptyText}>Your Pull List is empty.</Text>
+                    <Text style={styles.subText}>Tap the button below to start tracking.</Text>
+                </View>
+            ) : (
+                <FlatList
+                    data={series}
+                    keyExtractor={(item) => item.id}
+                    numColumns={2}
+                    contentContainerStyle={{ padding: 10 }}
+                    columnWrapperStyle={{ justifyContent: 'space-between', paddingHorizontal: 5 }}
+                    renderItem={({ item }) => (
+                        <View style={styles.gridCard}>
+                            <View style={styles.imagePlaceholder}>
+                                {item.image_url ? (
+                                    <Image
+                                        source={{ uri: item.image_url }}
+                                        style={{ width: '100%', height: '100%' }}
+                                        resizeMode="cover"
+                                    />
+                                ) : (
+                                    <Text style={{ color: '#444' }}>No Cover</Text>
+                                )}
+                                {/* Delete Button Overlay */}
+                                <TouchableOpacity
+                                    style={styles.deleteButton}
+                                    onPress={() => removeSeries(item.id, item.title)}
+                                >
+                                    <Text style={styles.deleteButtonText}>✕</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <View style={styles.textContainer}>
+                                <Text style={styles.gridTitle} numberOfLines={2}>
+                                    {item.title}
+                                </Text>
+                                <Text style={styles.nextIssueDate}>
+                                    {nextIssueDates[item.id]
+                                        ? `Next: ${new Date(nextIssueDates[item.id] + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                                        : 'Next: —'}
+                                </Text>
+                            </View>
+                        </View>
+                    )}
+                />
+            )}
+
+            {/* Floating Action Button */}
+            <Link href="/search" asChild>
+                <TouchableOpacity style={styles.fab}>
+                    <Text style={styles.fabText}>+ Add Series</Text>
+                </TouchableOpacity>
+            </Link>
+        </View>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: { flex: 1, backgroundColor: '#121212' },
+    emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    emptyText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
+    subText: { color: '#888888', fontSize: 14, marginTop: 8 },
+    gridCard: {
+        backgroundColor: '#1e1e1e',
+        width: '48%',
+        borderRadius: 12,
+        marginBottom: 15,
+        overflow: 'hidden',
+        elevation: 3,
+    },
+    imagePlaceholder: {
+        width: '100%',
+        aspectRatio: 2 / 3,
+        backgroundColor: '#2a2a2a',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    textContainer: {
+        padding: 10,
+        minHeight: 50,
+        backgroundColor: '#1e1e1e',
+    },
+    gridTitle: {
+        color: '#ffffff',
+        fontSize: 13,
+        fontWeight: 'bold',
+        lineHeight: 18,
+    },
+    nextIssueDate: {
+        color: '#ff4757',
+        fontSize: 11,
+        marginTop: 3,
+        fontWeight: '600',
+    },
+    deleteButton: {
+        position: 'absolute',
+        top: 6,
+        right: 6,
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+    },
+    deleteButtonText: {
+        color: '#ff4757',
+        fontSize: 14,
+        fontWeight: 'bold',
+        marginTop: -2,
+    },
+    fab: {
+        position: 'absolute',
+        bottom: 30,
+        right: 20,
+        backgroundColor: '#ff4757',
+        paddingVertical: 14,
+        paddingHorizontal: 20,
+        borderRadius: 30,
+        elevation: 5,
+    },
+    fabText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+});
