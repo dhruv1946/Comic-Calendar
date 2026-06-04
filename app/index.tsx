@@ -1,7 +1,8 @@
 import { encode } from 'base-64';
+import { Image } from 'expo-image';
 import { Link, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../supabase';
 interface Series {
     id: string;
@@ -13,7 +14,7 @@ interface Series {
 export default function Home() {
     const [series, setSeries] = useState<Series[]>([]);
     const [loading, setLoading] = useState(true);
-    const [nextIssueDates, setNextIssueDates] = useState<Record<string, string>>({});
+    const [nextIssueDates, setNextIssueDates] = useState<Record<string, { date: string; label: 'next' | 'latest' }>>({});
 
     const metronUser = 'anon';
     const metronPass = '***REDACTED_METRON_PASS***';
@@ -33,8 +34,8 @@ export default function Home() {
             if (error) throw error;
             if (data) {
                 setSeries(data);
-                // Fetch next issue dates in background
-                fetchNextIssueDates(data);
+                await repairMissingCovers(data);
+                await fetchNextIssueDates(data);
             }
         } catch (error) {
             console.error('Error fetching series:', error);
@@ -43,30 +44,89 @@ export default function Home() {
         }
     };
 
+    const repairMissingCovers = async (seriesList: Series[]) => {
+        const headers = {
+            'Authorization': 'Basic ' + encode(`${metronUser}:${metronPass}`),
+        };
+
+        for (const s of seriesList) {
+            if (s.image_url || !s.metron_id) continue;
+            console.log(`[Cover Repair] Fetching cover for "${s.title}" (metron_id: ${s.metron_id})...`);
+            try {
+                const resp = await fetch(
+                    `https://metron.cloud/api/issue/?series_id=${s.metron_id}&number=1`,
+                    { headers }
+                );
+                console.log(`[Cover Repair] Response status: ${resp.status}`);
+                if (!resp.ok) continue;
+                const json = await resp.json();
+                console.log(`[Cover Repair] Results count: ${json.count}, image: ${json.results?.[0]?.image}`);
+                const coverUrl = json.results?.[0]?.image || null;
+                if (coverUrl) {
+                    const { error: updateError } = await supabase
+                        .from('series')
+                        .update({ image_url: coverUrl })
+                        .eq('id', s.id);
+                    console.log(`[Cover Repair] DB update result:`, updateError ? updateError.message : 'success');
+                    setSeries((prev) =>
+                        prev.map((item) =>
+                            item.id === s.id ? { ...item, image_url: coverUrl } : item
+                        )
+                    );
+                }
+            } catch (e: any) {
+                console.log(`[Cover Repair] ERROR for ${s.title}:`, e?.message || e);
+            }
+        }
+    };
+
     const fetchNextIssueDates = async (seriesList: Series[]) => {
         const headers = {
             'Authorization': 'Basic ' + encode(`${metronUser}:${metronPass}`),
         };
         const today = new Date().toISOString().split('T')[0];
+        const futureDate = new Date();
+        futureDate.setFullYear(futureDate.getFullYear() + 1);
+        const futureDateStr = futureDate.toISOString().split('T')[0];
 
         for (const s of seriesList) {
             if (!s.metron_id) continue;
             try {
                 const resp = await fetch(
-                    `https://metron.cloud/api/issue/?series_id=${s.metron_id}&store_date_range_after=${today}&ordering=store_date`,
+                    `https://metron.cloud/api/issue/?series_id=${s.metron_id}&store_date_range_after=${today}&store_date_range_before=${futureDateStr}&ordering=store_date`,
                     { headers }
                 );
-                if (!resp.ok) continue;
+                if (!resp.ok) {
+                    console.log(`Next issue API failed for ${s.title}: ${resp.status}`);
+                    continue;
+                }
                 const json = await resp.json();
+                console.log(`Next issue for ${s.title}:`, json.count, 'results');
                 const nextIssue = json.results?.[0];
                 if (nextIssue?.store_date) {
                     setNextIssueDates((prev) => ({
                         ...prev,
-                        [s.id]: nextIssue.store_date,
+                        [s.id]: { date: nextIssue.store_date, label: 'next' },
+                    }));
+                    continue;
+                }
+
+                const fallbackResp = await fetch(
+                    `https://metron.cloud/api/issue/?series_id=${s.metron_id}&ordering=-store_date`,
+                    { headers }
+                );
+                if (!fallbackResp.ok) continue;
+                const fallbackJson = await fallbackResp.json();
+                const latestIssue = fallbackJson.results?.[0];
+                if (latestIssue?.store_date) {
+                    console.log(`Using latest issue date for ${s.title}: ${latestIssue.store_date}`);
+                    setNextIssueDates((prev) => ({
+                        ...prev,
+                        [s.id]: { date: latestIssue.store_date, label: 'latest' },
                     }));
                 }
             } catch (_e) {
-                // API unreachable, skip
+                console.log(`Next issue fetch error for ${s.title}:`, _e);
             }
         }
     };
@@ -81,7 +141,6 @@ export default function Home() {
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            // 1. Delete from Supabase database
                             const { error } = await supabase
                                 .from('series')
                                 .delete()
@@ -89,7 +148,6 @@ export default function Home() {
 
                             if (error) throw error;
 
-                            // 2. Instantly remove it from the screen
                             setSeries((prevSeries) => prevSeries.filter((item) => item.id !== id));
 
                         } catch (error) {
@@ -101,6 +159,49 @@ export default function Home() {
             ]
         );
     };
+
+    const renderItem = useCallback(({ item }: { item: Series }) => (
+        <View style={styles.gridCard}>
+            <View style={styles.imagePlaceholder}>
+                {item.image_url ? (
+                    <Image
+                        source={{ uri: item.image_url }}
+                        style={styles.coverImage}
+                        contentFit="cover"
+                        transition={200}
+                        cachePolicy="memory-disk"
+                        recyclingKey={item.id}
+                        placeholder={{ uri: undefined }}
+                        placeholderContentFit="cover"
+                    />
+                ) : (
+                    <Text style={{ color: '#444' }}>No Cover</Text>
+                )}
+                <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={() => removeSeries(item.id, item.title)}
+                >
+                    <Text style={styles.deleteButtonText}>✕</Text>
+                </TouchableOpacity>
+            </View>
+            <View style={styles.textContainer}>
+                <Text style={styles.gridTitle} numberOfLines={2}>
+                    {item.title}
+                </Text>
+                <Text style={[
+                    styles.nextIssueDate,
+                    nextIssueDates[item.id]?.label === 'latest' && styles.latestIssueDate,
+                ]}>
+                    {nextIssueDates[item.id]
+                        ? `${nextIssueDates[item.id].label === 'next' ? 'Next' : 'Latest'}: ${new Date(nextIssueDates[item.id].date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                        : 'Next: —'}
+                </Text>
+            </View>
+        </View>
+    ), [nextIssueDates]);
+
+    const keyExtractor = useCallback((item: Series) => item.id, []);
+
     return (
         <View style={styles.container}>
             {loading ? (
@@ -113,46 +214,20 @@ export default function Home() {
             ) : (
                 <FlatList
                     data={series}
-                    keyExtractor={(item) => item.id}
+                    extraData={nextIssueDates}
+                    keyExtractor={keyExtractor}
                     numColumns={2}
                     contentContainerStyle={{ padding: 10 }}
                     columnWrapperStyle={{ justifyContent: 'space-between', paddingHorizontal: 5 }}
-                    renderItem={({ item }) => (
-                        <View style={styles.gridCard}>
-                            <View style={styles.imagePlaceholder}>
-                                {item.image_url ? (
-                                    <Image
-                                        source={{ uri: item.image_url }}
-                                        style={{ width: '100%', height: '100%' }}
-                                        resizeMode="cover"
-                                    />
-                                ) : (
-                                    <Text style={{ color: '#444' }}>No Cover</Text>
-                                )}
-                                {/* Delete Button Overlay */}
-                                <TouchableOpacity
-                                    style={styles.deleteButton}
-                                    onPress={() => removeSeries(item.id, item.title)}
-                                >
-                                    <Text style={styles.deleteButtonText}>✕</Text>
-                                </TouchableOpacity>
-                            </View>
-                            <View style={styles.textContainer}>
-                                <Text style={styles.gridTitle} numberOfLines={2}>
-                                    {item.title}
-                                </Text>
-                                <Text style={styles.nextIssueDate}>
-                                    {nextIssueDates[item.id]
-                                        ? `Next: ${new Date(nextIssueDates[item.id] + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                                        : 'Next: —'}
-                                </Text>
-                            </View>
-                        </View>
-                    )}
+                    renderItem={renderItem}
+                    initialNumToRender={6}
+                    maxToRenderPerBatch={4}
+                    windowSize={5}
+                    removeClippedSubviews={true}
+                    getItemLayout={undefined}
                 />
             )}
 
-            {/* Floating Action Button */}
             <Link href="/search" asChild>
                 <TouchableOpacity style={styles.fab}>
                     <Text style={styles.fabText}>+ Add Series</Text>
@@ -182,6 +257,10 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
+    coverImage: {
+        width: '100%',
+        height: '100%',
+    },
     textContainer: {
         padding: 10,
         minHeight: 50,
@@ -198,6 +277,9 @@ const styles = StyleSheet.create({
         fontSize: 11,
         marginTop: 3,
         fontWeight: '600',
+    },
+    latestIssueDate: {
+        color: '#ffa502',
     },
     deleteButton: {
         position: 'absolute',

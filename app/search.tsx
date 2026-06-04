@@ -17,13 +17,36 @@ export default function Search() {
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(false);
-    const [statusFilter, setStatusFilter] = useState('All'); // 'All', 'Ongoing', 'Limited'
-    const [sortBy, setSortBy] = useState('Relevance'); // 'Relevance', 'Recent'
+    const [statusFilter, setStatusFilter] = useState('All');
+    const [sortBy, setSortBy] = useState('Relevance');
 
-    // Metron.cloud login credentials
     const metronUser = "anon";
     const metronPass = "***REDACTED_METRON_PASS***";
 
+    const fetchWithTimeout = async (url: string, options: any = {}, timeoutMs = 8000) => {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal
+            });
+            clearTimeout(id);
+
+            if (!response.ok) {
+                throw new Error(`Server responded with status ${response.status}`);
+            }
+
+            return response;
+        } catch (error: any) {
+            clearTimeout(id);
+            if (error.name === 'AbortError') {
+                throw new Error('Request timed out. Metron might be down.');
+            }
+            throw error;
+        }
+    };
     const handleSearch = async () => {
         if (!query.trim()) return;
         setLoading(true);
@@ -37,15 +60,13 @@ export default function Search() {
                 'Content-Type': 'application/json'
             };
 
-            // Primary search: raw query
-            const response = await fetch(
+            const response = await fetchWithTimeout(
                 `https://metron.cloud/api/series/?name=${encodeURIComponent(trimmed)}`,
                 { headers }
             );
             const data = await response.json();
             let allResults: SearchResult[] = data.results || [];
 
-            // Secondary search: if year detected, also search name + year_began
             if (yearMatch) {
                 const namePart = yearMatch[1].trim();
                 const yearPart = yearMatch[2];
@@ -56,14 +77,12 @@ export default function Search() {
                     );
                     const data2 = await resp2.json();
                     const extraResults: SearchResult[] = data2.results || [];
-                    // Merge & deduplicate
                     const seenIds = new Set(allResults.map(r => r.id));
                     for (const item of extraResults) {
                         if (!seenIds.has(item.id)) {
                             allResults.push(item);
                         }
                     }
-                    // Sort: year matches first
                     const targetYear = parseInt(yearPart, 10);
                     allResults.sort((a, b) => {
                         const aMatch = a.year_began === targetYear ? 0 : 1;
@@ -79,28 +98,14 @@ export default function Search() {
             setResults(allResults);
             setLoading(false);
 
-            // Fetch covers one at a time in the background
-            for (const series of allResults) {
-                try {
-                    const issueResp = await fetch(
-                        `https://metron.cloud/api/issue/?series_id=${series.id}&number=1`,
-                        { headers }
-                    );
-                    const issueData = await issueResp.json();
-                    const coverUrl = issueData.results?.[0]?.image || null;
-                    if (coverUrl) {
-                        setResults((prev) =>
-                            prev.map((item) =>
-                                item.id === series.id ? { ...item, image_url: coverUrl } : item
-                            )
-                        );
-                    }
-                } catch (_e) {
-                    // Skip cover for this series
-                }
-            }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Search error:', error);
+            Alert.alert(
+                "Database Offline",
+                "The comic database is currently experiencing issues or taking too long to respond. Please try again later."
+            );
+            setResults([]);
+        } finally {
             setLoading(false);
         }
     };
@@ -108,9 +113,8 @@ export default function Search() {
 
     const addSeries = async (item: SearchResult) => {
         try {
-            setLoading(true); // Show a loader while we hunt for the cover
+            setLoading(true);
 
-            // 1. Ask Metron for the issues in this series
             const issueResponse = await fetch(
                 `https://metron.cloud/api/issue/?series_id=${item.id}&number=1`,
                 {
@@ -121,15 +125,13 @@ export default function Search() {
             );
             const issueData = await issueResponse.json();
 
-            // 2. Grab the cover from Issue #1 (or fallback to a placeholder)
             const coverUrl = issueData.results?.[0]?.image || null;
 
-            // 3. Save to Supabase
             const { error } = await supabase.from('series').insert([{
                 metron_id: item.id,
                 title: item.name || item.series || 'Unknown',
                 publisher: typeof item.publisher === 'string' ? item.publisher : item.publisher?.name || 'Unknown',
-                image_url: coverUrl, // Now we actually have a real URL!
+                image_url: coverUrl,
             }]);
 
             if (error) {
@@ -150,7 +152,6 @@ export default function Search() {
     };
     return (
         <View style={styles.container}>
-            {/* Search Bar Area */}
             <View style={styles.searchHeader}>
                 <TextInput
                     style={styles.input}
@@ -164,12 +165,9 @@ export default function Search() {
                     <Text style={styles.buttonText}>Search</Text>
                 </TouchableOpacity>
             </View>
-            {/* Search Bar Area (Keep your existing search input here) */}
 
-            {/* NEW: Filter & Sort Chips */}
             <View style={{ marginBottom: 15 }}>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipContainer}>
-                    {/* Status Filters */}
                     <TouchableOpacity
                         style={[styles.chip, statusFilter === 'All' && styles.activeChip]}
                         onPress={() => setStatusFilter('All')}
@@ -191,10 +189,8 @@ export default function Search() {
                         <Text style={[styles.chipText, statusFilter === 'Limited' && styles.activeChipText]}>Limited</Text>
                     </TouchableOpacity>
 
-                    {/* Divider */}
                     <View style={styles.chipDivider} />
 
-                    {/* Sort Filters */}
                     <TouchableOpacity
                         style={[styles.chip, sortBy === 'Recent' && styles.activeChip]}
                         onPress={() => setSortBy(sortBy === 'Recent' ? 'Relevance' : 'Recent')}
@@ -206,8 +202,6 @@ export default function Search() {
                 </ScrollView>
             </View>
 
-            {/* Results Area (Keep your existing FlatList here) */}
-            {/* Results Area */}
             {loading ? (
                 <ActivityIndicator size="large" color="#ff4757" style={{ marginTop: 40 }} />
             ) : (
@@ -280,7 +274,7 @@ const styles = StyleSheet.create({
     },
     textContainer: {
         padding: 10,
-        minHeight: 70, // Ensures there is space for the title
+        minHeight: 70,
         backgroundColor: '#1e1e1e'
     },
     gridTitle: {
@@ -331,7 +325,7 @@ const styles = StyleSheet.create({
         position: 'absolute',
         top: 6,
         right: 6,
-        backgroundColor: 'rgba(0, 0, 0, 0.7)', // Semi-transparent black
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
         width: 26,
         height: 26,
         borderRadius: 13,
@@ -344,6 +338,6 @@ const styles = StyleSheet.create({
         color: '#ff4757',
         fontSize: 14,
         fontWeight: 'bold',
-        marginTop: -2, // Perfectly centers the X visually
+        marginTop: -2,
     },
 });
