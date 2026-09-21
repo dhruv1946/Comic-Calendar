@@ -1,26 +1,47 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Link, Stack, useRouter, useSegments } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../supabase';
+import { Colors } from '../constants/styles';
+import { auth } from '../firebase';
 
+// ── Error Boundary ───────────────────────────────────────────────────
+// Expo Router uses this export to wrap screens automatically
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+    return (
+        <View style={{ flex: 1, backgroundColor: Colors.background, justifyContent: 'center', alignItems: 'center', padding: 30 }}>
+            <Text style={{ color: Colors.primary, fontSize: 48, marginBottom: 20 }}>⚠️</Text>
+            <Text style={{ color: Colors.textPrimary, fontSize: 20, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>
+                Something went wrong
+            </Text>
+            <Text style={{ color: Colors.textSecondary, fontSize: 14, textAlign: 'center', marginBottom: 30 }}>
+                {error.message}
+            </Text>
+            <TouchableOpacity
+                onPress={retry}
+                style={{ backgroundColor: Colors.primary, paddingVertical: 14, paddingHorizontal: 30, borderRadius: 8 }}
+            >
+                <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>Try Again</Text>
+            </TouchableOpacity>
+        </View>
+    );
+}
+
+// ── Root Layout ──────────────────────────────────────────────────────
 export default function Layout() {
     const router = useRouter();
     const segments = useSegments();
     const [isReady, setIsReady] = useState(false);
-    const [session, setSession] = useState<any>(null);
-    const hasNavigated = useRef(false);
+    const [user, setUser] = useState<User | null>(null);
 
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session: s } }) => {
-            setSession(s);
+        const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+            setUser(firebaseUser);
             setIsReady(true);
         });
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
-            setSession(s);
-        });
-
-        return () => subscription.unsubscribe();
+        return () => unsubscribe();
     }, []);
 
     useEffect(() => {
@@ -28,17 +49,17 @@ export default function Layout() {
 
         const inLoginScreen = segments[0] === 'login';
 
-        if (!session && !inLoginScreen) {
+        if (!user && !inLoginScreen) {
             router.replace('/login');
-        } else if (session && inLoginScreen) {
+        } else if (user && inLoginScreen) {
             router.replace('/');
         }
-    }, [isReady, session]);
+    }, [isReady, user]);
 
     if (!isReady) {
         return (
-            <View style={{ flex: 1, backgroundColor: '#121212', justifyContent: 'center', alignItems: 'center' }}>
-                <ActivityIndicator size="large" color="#ff4757" />
+            <View style={{ flex: 1, backgroundColor: Colors.background, justifyContent: 'center', alignItems: 'center' }}>
+                <ActivityIndicator size="large" color={Colors.primary} />
             </View>
         );
     }
@@ -47,8 +68,8 @@ export default function Layout() {
         <Stack
             screenOptions={{
                 headerStyle: { backgroundColor: '#1a1a1a' },
-                headerTintColor: '#ffffff',
-                contentStyle: { backgroundColor: '#121212' },
+                headerTintColor: Colors.textPrimary,
+                contentStyle: { backgroundColor: Colors.background },
             }}
         >
             <Stack.Screen
@@ -58,13 +79,26 @@ export default function Layout() {
                     headerRight: () => (
                         <Link href="/profile" asChild>
                             <TouchableOpacity style={{ marginRight: 15 }}>
-                                <Text style={{ color: '#ff4757', fontWeight: 'bold' }}>Profile</Text>
+                                <Text style={{ color: Colors.primary, fontWeight: 'bold' }}>Profile</Text>
                             </TouchableOpacity>
                         </Link>
                     )
                 }}
             />
-            <Stack.Screen name="search" options={{ title: 'Search Database' }} />
+            <Stack.Screen
+                name="search"
+                options={{
+                    title: 'Search Database',
+                    headerLeft: () => (
+                        <TouchableOpacity
+                            onPress={() => router.replace('/')}
+                            style={{ padding: 6, marginRight: 8 }}
+                        >
+                            <Ionicons name="chevron-back" size={24} color={Colors.textPrimary} />
+                        </TouchableOpacity>
+                    ),
+                }}
+            />
             <Stack.Screen name="login" options={{ headerShown: false }} />
             <Stack.Screen name="signup" options={{ headerShown: false }} />
             <Stack.Screen name="profile" options={{ title: 'Your Profile', presentation: 'modal' }} />

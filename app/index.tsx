@@ -1,42 +1,90 @@
-import { encode } from 'base-64';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import { Link, useFocusEffect } from 'expo-router';
+import { sendEmailVerification } from 'firebase/auth';
+import { collection, deleteDoc, doc, getDocs, orderBy, query, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../supabase';
+import { batchParallel, fetchIssueCover, fetchIssueDate, clearDateCache } from '../constants/metron';
+import { Colors, SharedStyles } from '../constants/styles';
+import { auth, db } from '../firebase';
+
+const ISSUE_DATES_CACHE_KEY = 'comic_calendar_issue_dates_v2';
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
 interface Series {
     id: string;
     title: string;
     created_at: string;
+    metron_id?: number;
+    image_url?: string;
     [key: string]: any;
 }
 
 export default function Home() {
     const [series, setSeries] = useState<Series[]>([]);
     const [loading, setLoading] = useState(true);
+    const [refreshingDates, setRefreshingDates] = useState(false);
     const [nextIssueDates, setNextIssueDates] = useState<Record<string, { date: string; label: 'next' | 'latest' }>>({});
-
-    const metronUser = 'anon';
-    const metronPass = '***REDACTED_METRON_PASS***';
+    const [emailVerified, setEmailVerified] = useState(true);
+    const [bannerDismissed, setBannerDismissed] = useState(false);
 
     useFocusEffect(
         useCallback(() => {
+            checkEmailVerification();
             fetchPullList();
         }, [])
     );
+
+    const checkEmailVerification = async () => {
+        const user = auth.currentUser;
+        if (user) {
+            await user.reload();
+            setEmailVerified(user.emailVerified);
+        }
+    };
+
+    const handleResendVerification = async () => {
+        const user = auth.currentUser;
+        if (user) {
+            try {
+                await sendEmailVerification(user);
+                Alert.alert('Email Sent', 'Verification email has been resent. Check your inbox.');
+            } catch {
+                Alert.alert('Error', 'Could not send verification email. Please try again later.');
+            }
+        }
+    };
+
     const fetchPullList = async () => {
         try {
-            const { data, error } = await supabase
-                .from('series')
-                .select('*')
-                .order('created_at', { ascending: false });
+            const user = auth.currentUser;
+            if (!user) return;
 
-            if (error) throw error;
-            if (data) {
-                setSeries(data);
-                await repairMissingCovers(data);
-                await fetchNextIssueDates(data);
-            }
+            const seriesQuery = query(
+                collection(db, 'series'),
+                where('user_id', '==', user.uid),
+                orderBy('created_at', 'desc'),
+            );
+
+            const snapshot = await getDocs(seriesQuery);
+            const data: Series[] = snapshot.docs.map((d) => ({
+                id: d.id,
+                ...d.data(),
+            } as Series));
+
+            setSeries(data);
+            setLoading(false);
+
+            // Load cached issue dates instantly (no network)
+            const cacheIsFresh = await loadCachedIssueDates();
+
+            // Enrich with Metron data in background — don't block the UI
+            // Only refresh dates if cache is stale (6+ hours old)
+            Promise.all([
+                repairMissingCovers(data).catch(() => { }),
+                cacheIsFresh ? Promise.resolve() : refreshDates(data).catch(() => { }),
+            ]).catch(() => { /* background enrichment failed — non-critical */ });
         } catch (error) {
             console.error('Error fetching series:', error);
         } finally {
@@ -44,93 +92,97 @@ export default function Home() {
         }
     };
 
-    const repairMissingCovers = async (seriesList: Series[]) => {
-        const headers = {
-            'Authorization': 'Basic ' + encode(`${metronUser}:${metronPass}`),
-        };
+    /** Load cached issue dates from AsyncStorage. Returns true if cache is fresh. */
+    const loadCachedIssueDates = async (): Promise<boolean> => {
+        try {
+            const cached = await AsyncStorage.getItem(ISSUE_DATES_CACHE_KEY);
+            if (cached) {
+                const { data, timestamp } = JSON.parse(cached);
+                setNextIssueDates(data);
 
-        for (const s of seriesList) {
-            if (s.image_url || !s.metron_id) continue;
-            console.log(`[Cover Repair] Fetching cover for "${s.title}" (metron_id: ${s.metron_id})...`);
-            try {
-                const resp = await fetch(
-                    `https://metron.cloud/api/issue/?series_id=${s.metron_id}&number=1`,
-                    { headers }
+                // Cache is stale if older than 6 hours
+                if (Date.now() - timestamp >= CACHE_TTL_MS) return false;
+
+                // Cache is also stale if ANY 'next' date has already passed
+                const today = new Date().toISOString().split('T')[0];
+                const hasPassedDate = Object.values(data).some(
+                    (entry: any) => entry?.label === 'next' && entry?.date && entry.date <= today,
                 );
-                console.log(`[Cover Repair] Response status: ${resp.status}`);
-                if (!resp.ok) continue;
-                const json = await resp.json();
-                console.log(`[Cover Repair] Results count: ${json.count}, image: ${json.results?.[0]?.image}`);
-                const coverUrl = json.results?.[0]?.image || null;
+                if (hasPassedDate) return false;
+
+                return true;
+            }
+        } catch {
+            // Cache miss is fine
+        }
+        return false;
+    };
+
+    const repairMissingCovers = async (seriesList: Series[]) => {
+        const needsRepair = seriesList.filter((s) => !s.image_url && s.metron_id);
+        if (needsRepair.length === 0) return;
+
+        await batchParallel(
+            needsRepair,
+            async (s) => {
+                const coverUrl = await fetchIssueCover(s.metron_id!);
                 if (coverUrl) {
-                    const { error: updateError } = await supabase
-                        .from('series')
-                        .update({ image_url: coverUrl })
-                        .eq('id', s.id);
-                    console.log(`[Cover Repair] DB update result:`, updateError ? updateError.message : 'success');
+                    await updateDoc(doc(db, 'series', s.id), { image_url: coverUrl });
                     setSeries((prev) =>
                         prev.map((item) =>
-                            item.id === s.id ? { ...item, image_url: coverUrl } : item
-                        )
+                            item.id === s.id ? { ...item, image_url: coverUrl } : item,
+                        ),
                     );
                 }
-            } catch (e: any) {
-                console.log(`[Cover Repair] ERROR for ${s.title}:`, e?.message || e);
-            }
+            },
+            1, // Sequential — respect rate limits
+        );
+    };
+
+    /** Clear stale metron date caches and re-fetch all dates */
+    const refreshDates = async (seriesList: Series[]) => {
+        const withMetronId = seriesList.filter((s) => s.metron_id);
+        if (withMetronId.length === 0) return;
+
+        setRefreshingDates(true);
+
+        // Clear per-series metron date caches so fetchIssueDate actually hits the API
+        for (const s of withMetronId) {
+            if (s.metron_id) clearDateCache(s.metron_id);
+        }
+
+        try {
+            await batchParallel(
+                withMetronId,
+                async (s) => {
+                    const result = await fetchIssueDate(s.metron_id!);
+                    if (result) {
+                        setNextIssueDates((prev) => {
+                            const updated = { ...prev, [s.id]: result };
+                            AsyncStorage.setItem(
+                                ISSUE_DATES_CACHE_KEY,
+                                JSON.stringify({ data: updated, timestamp: Date.now() }),
+                            ).catch(() => {});
+                            return updated;
+                        });
+                    }
+                },
+                1, // Sequential — respect rate limits
+            );
+        } finally {
+            setRefreshingDates(false);
         }
     };
 
-    const fetchNextIssueDates = async (seriesList: Series[]) => {
-        const headers = {
-            'Authorization': 'Basic ' + encode(`${metronUser}:${metronPass}`),
-        };
-        const today = new Date().toISOString().split('T')[0];
-        const futureDate = new Date();
-        futureDate.setFullYear(futureDate.getFullYear() + 1);
-        const futureDateStr = futureDate.toISOString().split('T')[0];
-
-        for (const s of seriesList) {
-            if (!s.metron_id) continue;
-            try {
-                const resp = await fetch(
-                    `https://metron.cloud/api/issue/?series_id=${s.metron_id}&store_date_range_after=${today}&store_date_range_before=${futureDateStr}&ordering=store_date`,
-                    { headers }
-                );
-                if (!resp.ok) {
-                    console.log(`Next issue API failed for ${s.title}: ${resp.status}`);
-                    continue;
-                }
-                const json = await resp.json();
-                console.log(`Next issue for ${s.title}:`, json.count, 'results');
-                const nextIssue = json.results?.[0];
-                if (nextIssue?.store_date) {
-                    setNextIssueDates((prev) => ({
-                        ...prev,
-                        [s.id]: { date: nextIssue.store_date, label: 'next' },
-                    }));
-                    continue;
-                }
-
-                const fallbackResp = await fetch(
-                    `https://metron.cloud/api/issue/?series_id=${s.metron_id}&ordering=-store_date`,
-                    { headers }
-                );
-                if (!fallbackResp.ok) continue;
-                const fallbackJson = await fallbackResp.json();
-                const latestIssue = fallbackJson.results?.[0];
-                if (latestIssue?.store_date) {
-                    console.log(`Using latest issue date for ${s.title}: ${latestIssue.store_date}`);
-                    setNextIssueDates((prev) => ({
-                        ...prev,
-                        [s.id]: { date: latestIssue.store_date, label: 'latest' },
-                    }));
-                }
-            } catch (_e) {
-                console.log(`Next issue fetch error for ${s.title}:`, _e);
-            }
-        }
+    /** Manual force refresh from user */
+    const forceRefreshDates = async () => {
+        if (refreshingDates || series.length === 0) return;
+        // Clear the home screen cache so it re-fetches
+        await AsyncStorage.removeItem(ISSUE_DATES_CACHE_KEY).catch(() => {});
+        await refreshDates(series);
     };
-    const removeSeries = (id: string, title: string) => {
+
+    const removeSeries = useCallback((id: string, title: string) => {
         Alert.alert(
             "Remove Comic",
             `Are you sure you want to drop "${title}" from your Pull List?`,
@@ -141,15 +193,8 @@ export default function Home() {
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            const { error } = await supabase
-                                .from('series')
-                                .delete()
-                                .eq('id', id);
-
-                            if (error) throw error;
-
+                            await deleteDoc(doc(db, 'series', id));
                             setSeries((prevSeries) => prevSeries.filter((item) => item.id !== id));
-
                         } catch (error) {
                             console.error('Error deleting series:', error);
                             Alert.alert('Error', 'Could not remove the series from your list.');
@@ -158,15 +203,15 @@ export default function Home() {
                 }
             ]
         );
-    };
+    }, []);
 
     const renderItem = useCallback(({ item }: { item: Series }) => (
-        <View style={styles.gridCard}>
-            <View style={styles.imagePlaceholder}>
+        <View style={SharedStyles.gridCard}>
+            <View style={SharedStyles.imagePlaceholder}>
                 {item.image_url ? (
                     <Image
                         source={{ uri: item.image_url }}
-                        style={styles.coverImage}
+                        style={SharedStyles.coverImage}
                         contentFit="cover"
                         transition={200}
                         cachePolicy="memory-disk"
@@ -175,17 +220,17 @@ export default function Home() {
                         placeholderContentFit="cover"
                     />
                 ) : (
-                    <Text style={{ color: '#444' }}>No Cover</Text>
+                    <Text style={{ color: Colors.textMuted }}>No Cover</Text>
                 )}
                 <TouchableOpacity
-                    style={styles.deleteButton}
+                    style={SharedStyles.deleteButton}
                     onPress={() => removeSeries(item.id, item.title)}
                 >
-                    <Text style={styles.deleteButtonText}>✕</Text>
+                    <Text style={SharedStyles.deleteButtonText}>✕</Text>
                 </TouchableOpacity>
             </View>
-            <View style={styles.textContainer}>
-                <Text style={styles.gridTitle} numberOfLines={2}>
+            <View style={SharedStyles.textContainer}>
+                <Text style={SharedStyles.gridTitle} numberOfLines={2}>
                     {item.title}
                 </Text>
                 <Text style={[
@@ -202,10 +247,26 @@ export default function Home() {
 
     const keyExtractor = useCallback((item: Series) => item.id, []);
 
+    const showBanner = !emailVerified && !bannerDismissed;
+
     return (
-        <View style={styles.container}>
+        <View style={SharedStyles.screenContainer}>
+            {showBanner && (
+                <View style={styles.verificationBanner}>
+                    <View style={styles.bannerContent}>
+                        <Text style={styles.bannerText}>📧 Please verify your email</Text>
+                        <TouchableOpacity onPress={handleResendVerification}>
+                            <Text style={styles.resendText}>Resend</Text>
+                        </TouchableOpacity>
+                    </View>
+                    <TouchableOpacity onPress={() => setBannerDismissed(true)} style={styles.bannerClose}>
+                        <Text style={styles.bannerCloseText}>✕</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
+
             {loading ? (
-                <ActivityIndicator size="large" color="#ffffff" style={{ marginTop: 50 }} />
+                <ActivityIndicator size="large" color={Colors.textPrimary} style={{ marginTop: 50 }} />
             ) : series.length === 0 ? (
                 <View style={styles.emptyState}>
                     <Text style={styles.emptyText}>Your Pull List is empty.</Text>
@@ -225,6 +286,8 @@ export default function Home() {
                     windowSize={5}
                     removeClippedSubviews={true}
                     getItemLayout={undefined}
+                    onRefresh={forceRefreshDates}
+                    refreshing={refreshingDates}
                 />
             )}
 
@@ -238,77 +301,60 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#121212' },
     emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    emptyText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
-    subText: { color: '#888888', fontSize: 14, marginTop: 8 },
-    gridCard: {
-        backgroundColor: '#1e1e1e',
-        width: '48%',
-        borderRadius: 12,
-        marginBottom: 15,
-        overflow: 'hidden',
-        elevation: 3,
-    },
-    imagePlaceholder: {
-        width: '100%',
-        aspectRatio: 2 / 3,
-        backgroundColor: '#2a2a2a',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    coverImage: {
-        width: '100%',
-        height: '100%',
-    },
-    textContainer: {
-        padding: 10,
-        minHeight: 50,
-        backgroundColor: '#1e1e1e',
-    },
-    gridTitle: {
-        color: '#ffffff',
-        fontSize: 13,
-        fontWeight: 'bold',
-        lineHeight: 18,
-    },
+    emptyText: { color: Colors.textPrimary, fontSize: 18, fontWeight: 'bold' },
+    subText: { color: Colors.textSecondary, fontSize: 14, marginTop: 8 },
     nextIssueDate: {
-        color: '#ff4757',
+        color: Colors.primary,
         fontSize: 11,
         marginTop: 3,
         fontWeight: '600',
     },
     latestIssueDate: {
-        color: '#ffa502',
-    },
-    deleteButton: {
-        position: 'absolute',
-        top: 6,
-        right: 6,
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        width: 26,
-        height: 26,
-        borderRadius: 13,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.2)',
-    },
-    deleteButtonText: {
-        color: '#ff4757',
-        fontSize: 14,
-        fontWeight: 'bold',
-        marginTop: -2,
+        color: Colors.warning,
     },
     fab: {
         position: 'absolute',
         bottom: 30,
         right: 20,
-        backgroundColor: '#ff4757',
+        backgroundColor: Colors.primary,
         paddingVertical: 14,
         paddingHorizontal: 20,
         borderRadius: 30,
         elevation: 5,
     },
     fabText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+    verificationBanner: {
+        backgroundColor: '#2a2a1a',
+        borderBottomWidth: 1,
+        borderBottomColor: '#4a4a2a',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    bannerContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        flex: 1,
+    },
+    bannerText: { color: '#e8d44d', fontSize: 13, fontWeight: '500' },
+    resendText: { color: Colors.primary, fontSize: 13, fontWeight: 'bold', textDecorationLine: 'underline' },
+    bannerClose: { padding: 4, marginLeft: 8 },
+    bannerCloseText: { color: Colors.textSecondary, fontSize: 16 },
+    refreshBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 8,
+        marginBottom: 8,
+    },
+    refreshText: {
+        color: Colors.textSecondary,
+        fontSize: 12,
+        fontWeight: '600',
+    },
 });
