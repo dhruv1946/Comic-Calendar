@@ -1,7 +1,8 @@
-    import { useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { sendPasswordResetEmail, signInWithEmailAndPassword } from 'firebase/auth';
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { getFirebaseErrorMessage } from '../constants/firebaseErrors';
 import { Colors, SharedStyles } from '../constants/styles';
 import { validateEmail, validatePassword } from '../constants/validation';
 import { auth } from '../firebase';
@@ -32,7 +33,7 @@ export default function Login() {
             await signInWithEmailAndPassword(auth, email.trim(), password);
             router.replace('/');
         } catch (error: any) {
-            const message = getFirebaseAuthErrorMessage(error.code);
+            const message = getFirebaseErrorMessage(error.code);
             Alert.alert('Sign In Error', message);
         }
         setLoading(false);
@@ -53,7 +54,7 @@ export default function Login() {
             );
             setIsResetting(false);
         } catch (error: any) {
-            const message = getFirebaseAuthErrorMessage(error.code);
+            const message = getFirebaseErrorMessage(error.code);
             Alert.alert('Error', message);
         }
         setLoading(false);
@@ -132,25 +133,6 @@ export default function Login() {
             {loading && <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 20 }} />}
         </View>
     );
-}
-
-/** Map Firebase auth error codes to user-friendly messages */
-function getFirebaseAuthErrorMessage(code: string): string {
-    switch (code) {
-        case 'auth/user-not-found':
-        case 'auth/invalid-credential':
-            return 'Invalid email or password.';
-        case 'auth/wrong-password':
-            return 'Incorrect password.';
-        case 'auth/too-many-requests':
-            return 'Too many attempts. Please try again later.';
-        case 'auth/user-disabled':
-            return 'This account has been disabled.';
-        case 'auth/invalid-email':
-            return 'Please enter a valid email address.';
-        default:
-            return 'An unexpected error occurred. Please try again.';
-    }
 }
 
 const styles = StyleSheet.create({

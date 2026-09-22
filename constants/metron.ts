@@ -46,12 +46,11 @@ function delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function getAuthHeaders(): Record<string, string> {
-    return {
-        'Authorization': 'Basic ' + encode(`${METRON_USER}:${METRON_PASS}`),
-        'Content-Type': 'application/json',
-    };
-}
+// Pre-computed once at module load — no reason to re-encode on every request
+const AUTH_HEADERS: Record<string, string> = {
+    'Authorization': 'Basic ' + encode(`${METRON_USER}:${METRON_PASS}`),
+    'Content-Type': 'application/json',
+};
 
 // ── Persistent cache helpers ──
 async function getCached<T>(key: string): Promise<{ data: T; ts: number } | null> {
@@ -95,7 +94,7 @@ export async function metronFetch(path: string, timeoutMs = DEFAULT_TIMEOUT_MS):
 
     try {
         const response = await fetch(`${BASE_URL}${path}`, {
-            headers: getAuthHeaders(),
+            headers: AUTH_HEADERS,
             signal: controller.signal,
         });
         clearTimeout(id);
@@ -274,19 +273,24 @@ export async function fetchIssueDate(
 
         if (issues.length === 0) return null;
 
-        const withDates = issues.filter((i: any) => i.store_date);
-        const futureIssues = withDates
-            .filter((i: any) => i.store_date > today)
-            .sort((a: any, b: any) => a.store_date.localeCompare(b.store_date));
-        const pastIssues = withDates
-            .filter((i: any) => i.store_date <= today)
-            .sort((a: any, b: any) => b.store_date.localeCompare(a.store_date));
+        // Single-pass O(n): find closest future date and most recent past date
+        let nextDate: string | null = null;   // smallest future store_date
+        let latestDate: string | null = null;  // largest past store_date
+        for (const issue of issues) {
+            const d = issue.store_date;
+            if (!d) continue;
+            if (d > today) {
+                if (!nextDate || d < nextDate) nextDate = d;
+            } else {
+                if (!latestDate || d > latestDate) latestDate = d;
+            }
+        }
 
         let result: { date: string; label: 'next' | 'latest' } | null = null;
-        if (futureIssues.length > 0) {
-            result = { date: futureIssues[0].store_date, label: 'next' };
-        } else if (pastIssues.length > 0) {
-            result = { date: pastIssues[0].store_date, label: 'latest' };
+        if (nextDate) {
+            result = { date: nextDate, label: 'next' };
+        } else if (latestDate) {
+            result = { date: latestDate, label: 'latest' };
         }
 
         // Cache the result (even null, to avoid re-fetching)

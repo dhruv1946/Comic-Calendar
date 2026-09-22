@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { Link, useFocusEffect } from 'expo-router';
 import { sendEmailVerification } from 'firebase/auth';
 import { collection, deleteDoc, doc, getDocs, orderBy, query, updateDoc, where } from 'firebase/firestore';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { batchParallel, fetchIssueCover, fetchIssueDate, clearDateCache } from '../constants/metron';
 import { Colors, SharedStyles } from '../constants/styles';
@@ -26,6 +26,8 @@ export default function Home() {
     const [loading, setLoading] = useState(true);
     const [refreshingDates, setRefreshingDates] = useState(false);
     const [nextIssueDates, setNextIssueDates] = useState<Record<string, { date: string; label: 'next' | 'latest' }>>({});
+    const nextIssueDatesRef = useRef(nextIssueDates);
+    nextIssueDatesRef.current = nextIssueDates;
     const [emailVerified, setEmailVerified] = useState(true);
     const [bannerDismissed, setBannerDismissed] = useState(false);
 
@@ -79,12 +81,12 @@ export default function Home() {
             // Load cached issue dates instantly (no network)
             const cacheIsFresh = await loadCachedIssueDates();
 
-            // Enrich with Metron data in background — don't block the UI
-            // Only refresh dates if cache is stale (6+ hours old)
-            Promise.all([
-                repairMissingCovers(data).catch(() => { }),
-                cacheIsFresh ? Promise.resolve() : refreshDates(data).catch(() => { }),
-            ]).catch(() => { /* background enrichment failed — non-critical */ });
+            // Enrich with Metron data in background — don't block the UI.
+            // Run sequentially: covers first (usually 0 calls), then dates.
+            // This avoids concurrent requests to Metron from two parallel batches.
+            repairMissingCovers(data).catch(() => { }).then(() =>
+                cacheIsFresh ? Promise.resolve() : refreshDates(data).catch(() => { })
+            );
         } catch (error) {
             console.error('Error fetching series:', error);
         } finally {
@@ -224,7 +226,9 @@ export default function Home() {
         );
     }, []);
 
-    const renderItem = useCallback(({ item }: { item: Series }) => (
+    const renderItem = useCallback(({ item }: { item: Series }) => {
+        const dates = nextIssueDatesRef.current;
+        return (
         <View style={SharedStyles.gridCard}>
             <View style={SharedStyles.imagePlaceholder}>
                 {item.image_url ? (
@@ -235,8 +239,6 @@ export default function Home() {
                         transition={200}
                         cachePolicy="memory-disk"
                         recyclingKey={item.id}
-                        placeholder={{ uri: undefined }}
-                        placeholderContentFit="cover"
                     />
                 ) : (
                     <Text style={{ color: Colors.textMuted }}>No Cover</Text>
@@ -254,15 +256,16 @@ export default function Home() {
                 </Text>
                 <Text style={[
                     styles.nextIssueDate,
-                    nextIssueDates[item.id]?.label === 'latest' && styles.latestIssueDate,
+                    dates[item.id]?.label === 'latest' && styles.latestIssueDate,
                 ]}>
-                    {nextIssueDates[item.id]
-                        ? `${nextIssueDates[item.id].label === 'next' ? 'Next' : 'Latest'}: ${new Date(nextIssueDates[item.id].date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                    {dates[item.id]
+                        ? `${dates[item.id].label === 'next' ? 'Next' : 'Latest'}: ${new Date(dates[item.id].date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
                         : 'Next: —'}
                 </Text>
             </View>
         </View>
-    ), [nextIssueDates]);
+        );
+    }, [removeSeries]);
 
     const keyExtractor = useCallback((item: Series) => item.id, []);
 
@@ -304,7 +307,6 @@ export default function Home() {
                     maxToRenderPerBatch={4}
                     windowSize={5}
                     removeClippedSubviews={true}
-                    getItemLayout={undefined}
                     onRefresh={forceRefreshDates}
                     refreshing={refreshingDates}
                 />

@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import { createUserWithEmailAndPassword, sendEmailVerification, updateProfile } from 'firebase/auth';
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { getFirebaseErrorMessage } from '../constants/firebaseErrors';
 import { Colors, SharedStyles } from '../constants/styles';
 import { validateEmail, validateName, validatePassword } from '../constants/validation';
 import { auth } from '../firebase';
@@ -46,7 +47,7 @@ export default function Signup() {
 
             router.replace('/');
         } catch (error: any) {
-            const message = getFirebaseSignUpErrorMessage(error.code);
+            const message = getFirebaseErrorMessage(error.code);
             Alert.alert('Sign Up Error', message);
         }
         setLoading(false);
@@ -97,20 +98,6 @@ export default function Signup() {
             {loading && <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 20 }} />}
         </View>
     );
-}
-
-/** Map Firebase auth error codes to user-friendly messages */
-function getFirebaseSignUpErrorMessage(code: string): string {
-    switch (code) {
-        case 'auth/email-already-in-use':
-            return 'An account with this email already exists.';
-        case 'auth/invalid-email':
-            return 'Please enter a valid email address.';
-        case 'auth/weak-password':
-            return 'Password is too weak. Use at least 8 characters.';
-        default:
-            return 'An unexpected error occurred. Please try again.';
-    }
 }
 
 const styles = StyleSheet.create({
