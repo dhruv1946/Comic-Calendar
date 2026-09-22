@@ -1,14 +1,21 @@
 import { useRouter } from 'expo-router';
 import { signOut, updateProfile } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Colors, SharedStyles } from '../constants/styles';
+import { sendTestNotification } from '../constants/notifications';
 import { auth } from '../firebase';
 
 export default function Profile() {
     const [name, setName] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    
+    // Default to 9:00 AM
+    const [notificationTime, setNotificationTime] = useState(new Date(new Date().setHours(9, 0, 0, 0)));
+    const [showPicker, setShowPicker] = useState(false);
 
     const router = useRouter();
 
@@ -16,13 +23,35 @@ export default function Profile() {
         loadProfile();
     }, []);
 
-    function loadProfile() {
+    async function loadProfile() {
         const user = auth.currentUser;
         if (user) {
             setName(user.displayName || '');
         }
+
+        try {
+            const savedTime = await AsyncStorage.getItem('notificationTime');
+            if (savedTime) {
+                setNotificationTime(new Date(savedTime));
+            }
+        } catch (e) {
+            console.error('Failed to load notification time', e);
+        }
+
         setLoading(false);
     }
+
+    const handleTimeChange = async (event: any, selectedDate?: Date) => {
+        if (Platform.OS === 'android') setShowPicker(false);
+        if (selectedDate) {
+            setNotificationTime(selectedDate);
+            try {
+                await AsyncStorage.setItem('notificationTime', selectedDate.toISOString());
+            } catch (e) {
+                console.error('Failed to save time', e);
+            }
+        }
+    };
 
     async function handleSaveName() {
         const user = auth.currentUser;
@@ -76,6 +105,43 @@ export default function Profile() {
                 </TouchableOpacity>
             </View>
 
+            <View style={[styles.inputSection, { marginTop: 30 }]}>
+                <Text style={styles.label}>Notification Time</Text>
+                
+                {Platform.OS === 'ios' ? (
+                    <View style={styles.pickerContainer}>
+                        <DateTimePicker
+                            value={notificationTime}
+                            mode="time"
+                            display="spinner"
+                            onValueChange={handleTimeChange}
+                            textColor={Colors.textPrimary}
+                        />
+                    </View>
+                ) : (
+                    <>
+                        <TouchableOpacity style={[SharedStyles.input, { justifyContent: 'center' }]} onPress={() => setShowPicker(true)}>
+                            <Text style={{ color: Colors.textPrimary, fontSize: 16 }}>
+                                {notificationTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                        </TouchableOpacity>
+                        {showPicker && (
+                            <DateTimePicker
+                                value={notificationTime}
+                                mode="time"
+                                display="spinner"
+                                onValueChange={handleTimeChange}
+                                onDismiss={() => setShowPicker(false)}
+                            />
+                        )}
+                    </>
+                )}
+                
+                <TouchableOpacity style={[SharedStyles.secondaryButton, { marginTop: 10 }]} onPress={sendTestNotification}>
+                    <Text style={SharedStyles.secondaryButtonText}>Send Test Notification</Text>
+                </TouchableOpacity>
+            </View>
+
             <TouchableOpacity style={styles.logoutButton} onPress={handleSignOut}>
                 <Text style={styles.logoutText}>Log Out</Text>
             </TouchableOpacity>
@@ -99,6 +165,7 @@ const styles = StyleSheet.create({
     avatarInitial: { color: '#fff', fontSize: 48, fontWeight: 'bold' },
     emailText: { color: Colors.textSecondary, fontSize: 14, marginTop: 12 },
     inputSection: { gap: 10 },
+    pickerContainer: { alignItems: 'center', backgroundColor: Colors.surface, borderRadius: 8, overflow: 'hidden' },
     label: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600', marginLeft: 4 },
     logoutButton: { marginTop: 'auto', marginBottom: 20, padding: 16, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: Colors.primary },
     logoutText: { color: Colors.primary, fontWeight: 'bold', fontSize: 16 },

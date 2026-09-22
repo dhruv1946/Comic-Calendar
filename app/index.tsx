@@ -6,6 +6,7 @@ import { collection, deleteDoc, doc, getDocs, orderBy, query, updateDoc, where }
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { batchParallel, fetchIssueCover, fetchIssueDate, clearDateCache } from '../constants/metron';
+import { scheduleReleaseNotifications } from '../constants/notifications';
 import { Colors, SharedStyles } from '../constants/styles';
 import { auth, db } from '../firebase';
 
@@ -25,7 +26,7 @@ export default function Home() {
     const [series, setSeries] = useState<Series[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshingDates, setRefreshingDates] = useState(false);
-    const [nextIssueDates, setNextIssueDates] = useState<Record<string, { date: string; label: 'next' | 'latest' }>>({});
+    const [nextIssueDates, setNextIssueDates] = useState<Record<string, { date: string; label: 'next' | 'latest'; issueNumber?: string }>>({});
     const nextIssueDatesRef = useRef(nextIssueDates);
     nextIssueDatesRef.current = nextIssueDates;
     const [emailVerified, setEmailVerified] = useState(true);
@@ -58,6 +59,19 @@ export default function Home() {
         }
     };
 
+    const triggerSchedules = async (pullList: Series[], dates: Record<string, { date: string; label: 'next' | 'latest'; issueNumber?: string }>) => {
+        try {
+            const rawTime = await AsyncStorage.getItem('notificationTime');
+            let hours = 9, minutes = 0;
+            if (rawTime) {
+                const dt = new Date(rawTime);
+                hours = dt.getHours();
+                minutes = dt.getMinutes();
+            }
+            await scheduleReleaseNotifications(pullList, dates, { hours, minutes });
+        } catch (e) { console.error('Failed to schedule', e); }
+    };
+
     const fetchPullList = async () => {
         try {
             const user = auth.currentUser;
@@ -84,9 +98,20 @@ export default function Home() {
             // Enrich with Metron data in background — don't block the UI.
             // Run sequentially: covers first (usually 0 calls), then dates.
             // This avoids concurrent requests to Metron from two parallel batches.
-            repairMissingCovers(data).catch(() => { }).then(() =>
-                cacheIsFresh ? Promise.resolve() : refreshDates(data).catch(() => { })
-            );
+            repairMissingCovers(data).catch(() => { }).then(() => {
+                if (cacheIsFresh) {
+                    // Try to schedule using the state since loadCachedIssueDates just updated it
+                    // Due to state being async, we'll wait a tiny bit or just fetch the cache again
+                    AsyncStorage.getItem(ISSUE_DATES_CACHE_KEY).then(cached => {
+                        if (cached) {
+                            const { data: cachedDates } = JSON.parse(cached);
+                            triggerSchedules(data, cachedDates);
+                        }
+                    });
+                } else {
+                    refreshDates(data).catch(() => { });
+                }
+            });
         } catch (error) {
             console.error('Error fetching series:', error);
         } finally {
@@ -162,7 +187,7 @@ export default function Home() {
 
         try {
             // Seed accumulator with existing dates so we can batch write once at the end
-            let dateAcc: Record<string, { date: string; label: 'next' | 'latest' }> = { ...nextIssueDates };
+            let dateAcc: Record<string, { date: string; label: 'next' | 'latest'; issueNumber?: string }> = { ...nextIssueDates };
             try {
                 const raw = await AsyncStorage.getItem(ISSUE_DATES_CACHE_KEY);
                 if (raw) {
@@ -190,6 +215,8 @@ export default function Home() {
                 ISSUE_DATES_CACHE_KEY,
                 JSON.stringify({ data: dateAcc, timestamp: Date.now() }),
             ).catch(() => {});
+
+            triggerSchedules(seriesList, dateAcc);
         } finally {
             setRefreshingDates(false);
         }

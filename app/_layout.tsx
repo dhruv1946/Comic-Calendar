@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { Colors } from '../constants/styles';
 import { auth } from '../firebase';
+import { requestNotificationPermissions } from '../constants/notifications';
 
 // ── Error Boundary ───────────────────────────────────────────────────
 // Expo Router uses this export to wrap screens automatically
@@ -36,6 +37,8 @@ export default function Layout() {
     const [user, setUser] = useState<User | null>(null);
 
     useEffect(() => {
+        requestNotificationPermissions();
+
         const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
             setUser(firebaseUser);
             setIsReady(true);

@@ -249,7 +249,7 @@ function isDateCacheFresh(entry: { data: any; ts: number }): boolean {
  */
 export async function fetchIssueDate(
     seriesMetronId: number,
-): Promise<{ date: string; label: 'next' | 'latest' } | null> {
+): Promise<{ date: string; label: 'next' | 'latest'; issueNumber?: string } | null> {
     // Memory cache
     const memEntry = memDateCache.get(seriesMetronId);
     if (memEntry && isDateCacheFresh(memEntry)) {
@@ -258,7 +258,7 @@ export async function fetchIssueDate(
 
     // Disk cache
     const diskKey = `metron_date_${seriesMetronId}`;
-    const diskEntry = await getCached<{ date: string; label: 'next' | 'latest' } | null>(diskKey);
+    const diskEntry = await getCached<{ date: string; label: 'next' | 'latest'; issueNumber?: string } | null>(diskKey);
     if (diskEntry && isDateCacheFresh(diskEntry)) {
         memDateCache.set(seriesMetronId, { data: diskEntry.data, ts: diskEntry.ts });
         return diskEntry.data;
@@ -274,23 +274,23 @@ export async function fetchIssueDate(
         if (issues.length === 0) return null;
 
         // Single-pass O(n): find closest future date and most recent past date
-        let nextDate: string | null = null;   // smallest future store_date
-        let latestDate: string | null = null;  // largest past store_date
+        let nextIssue: any = null;   // smallest future store_date
+        let latestIssue: any = null;  // largest past store_date
         for (const issue of issues) {
             const d = issue.store_date;
             if (!d) continue;
             if (d > today) {
-                if (!nextDate || d < nextDate) nextDate = d;
+                if (!nextIssue || d < nextIssue.store_date) nextIssue = issue;
             } else {
-                if (!latestDate || d > latestDate) latestDate = d;
+                if (!latestIssue || d > latestIssue.store_date) latestIssue = issue;
             }
         }
 
-        let result: { date: string; label: 'next' | 'latest' } | null = null;
-        if (nextDate) {
-            result = { date: nextDate, label: 'next' };
-        } else if (latestDate) {
-            result = { date: latestDate, label: 'latest' };
+        let result: { date: string; label: 'next' | 'latest'; issueNumber?: string } | null = null;
+        if (nextIssue) {
+            result = { date: nextIssue.store_date, label: 'next', issueNumber: nextIssue.number };
+        } else if (latestIssue) {
+            result = { date: latestIssue.store_date, label: 'latest', issueNumber: latestIssue.number };
         }
 
         // Cache the result (even null, to avoid re-fetching)
