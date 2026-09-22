@@ -11,16 +11,37 @@ const https = require('https');
 const PORT = 3001;
 const TARGET = 'metron.cloud';
 
+// Only allow requests from localhost / 127.0.0.1 (any port)
+const LOCALHOST_ORIGIN_REGEX = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
 const server = http.createServer((req, res) => {
-    // CORS headers for all responses
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    const origin = req.headers.origin;
+    const isAllowedOrigin = origin && LOCALHOST_ORIGIN_REGEX.test(origin);
+
+    if (isAllowedOrigin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    }
 
     // Handle preflight
     if (req.method === 'OPTIONS') {
-        res.writeHead(204);
+        res.writeHead(isAllowedOrigin ? 204 : 403);
         res.end();
+        return;
+    }
+
+    // Only allow /api/ paths
+    if (!req.url || !req.url.startsWith('/api/')) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Forbidden: Only /api/ requests are permitted.');
+        return;
+    }
+
+    // Only allow GET requests
+    if (req.method !== 'GET') {
+        res.writeHead(405, { 'Content-Type': 'text/plain' });
+        res.end('Method Not Allowed: Metron client only requires GET requests.');
         return;
     }
 
@@ -37,10 +58,11 @@ const server = http.createServer((req, res) => {
     };
 
     const proxy = https.request(options, (proxyRes) => {
-        res.writeHead(proxyRes.statusCode, {
-            ...proxyRes.headers,
-            'Access-Control-Allow-Origin': '*',
-        });
+        const responseHeaders = { ...proxyRes.headers };
+        if (isAllowedOrigin) {
+            responseHeaders['Access-Control-Allow-Origin'] = origin;
+        }
+        res.writeHead(proxyRes.statusCode, responseHeaders);
         proxyRes.pipe(res);
     });
 
@@ -51,6 +73,16 @@ const server = http.createServer((req, res) => {
     });
 
     req.pipe(proxy);
+});
+
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.log(`\n[CORS Proxy] Port ${PORT} is already in use.`);
+        console.log(`A proxy instance is already running and ready. No action needed.\n`);
+        process.exit(0);
+    } else {
+        console.error('[CORS Proxy] Server error:', err);
+    }
 });
 
 server.listen(PORT, () => {

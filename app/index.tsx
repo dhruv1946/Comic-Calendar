@@ -139,47 +139,66 @@ export default function Home() {
         );
     };
 
-    /** Clear stale metron date caches and re-fetch all dates */
-    const refreshDates = async (seriesList: Series[]) => {
+    /**
+     * Fetch dates for series.
+     * If force=true (manual pull-to-refresh), clears per-series cache first to force fresh API calls.
+     * If force=false (auto-refresh on open), respects per-series cache and only calls Metron if stale.
+     */
+    const refreshDates = async (seriesList: Series[], force: boolean = false) => {
         const withMetronId = seriesList.filter((s) => s.metron_id);
         if (withMetronId.length === 0) return;
 
         setRefreshingDates(true);
 
-        // Clear per-series metron date caches so fetchIssueDate actually hits the API
-        for (const s of withMetronId) {
-            if (s.metron_id) clearDateCache(s.metron_id);
+        // Only wipe per-series Metron caches on manual pull-to-refresh.
+        // Auto-refresh lets fetchIssueDate's smart cache freshness determine if API call is needed.
+        if (force) {
+            for (const s of withMetronId) {
+                if (s.metron_id) clearDateCache(s.metron_id);
+            }
         }
 
         try {
+            // Seed accumulator with existing dates so we can batch write once at the end
+            let dateAcc: Record<string, { date: string; label: 'next' | 'latest' }> = { ...nextIssueDates };
+            try {
+                const raw = await AsyncStorage.getItem(ISSUE_DATES_CACHE_KEY);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed?.data) {
+                        dateAcc = { ...parsed.data, ...dateAcc };
+                    }
+                }
+            } catch { /* ignore */ }
+
             await batchParallel(
                 withMetronId,
                 async (s) => {
                     const result = await fetchIssueDate(s.metron_id!);
                     if (result) {
-                        setNextIssueDates((prev) => {
-                            const updated = { ...prev, [s.id]: result };
-                            AsyncStorage.setItem(
-                                ISSUE_DATES_CACHE_KEY,
-                                JSON.stringify({ data: updated, timestamp: Date.now() }),
-                            ).catch(() => {});
-                            return updated;
-                        });
+                        dateAcc[s.id] = result;
+                        setNextIssueDates((prev) => ({ ...prev, [s.id]: result }));
                     }
                 },
                 1, // Sequential — respect rate limits
             );
+
+            // Single batched write to AsyncStorage at the end of the entire batch
+            await AsyncStorage.setItem(
+                ISSUE_DATES_CACHE_KEY,
+                JSON.stringify({ data: dateAcc, timestamp: Date.now() }),
+            ).catch(() => {});
         } finally {
             setRefreshingDates(false);
         }
     };
 
-    /** Manual force refresh from user */
+    /** Manual force refresh from user (pull-to-refresh) */
     const forceRefreshDates = async () => {
         if (refreshingDates || series.length === 0) return;
         // Clear the home screen cache so it re-fetches
         await AsyncStorage.removeItem(ISSUE_DATES_CACHE_KEY).catch(() => {});
-        await refreshDates(series);
+        await refreshDates(series, true);
     };
 
     const removeSeries = useCallback((id: string, title: string) => {
@@ -344,17 +363,4 @@ const styles = StyleSheet.create({
     resendText: { color: Colors.primary, fontSize: 13, fontWeight: 'bold', textDecorationLine: 'underline' },
     bannerClose: { padding: 4, marginLeft: 8 },
     bannerCloseText: { color: Colors.textSecondary, fontSize: 16 },
-    refreshBar: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        paddingVertical: 8,
-        marginBottom: 8,
-    },
-    refreshText: {
-        color: Colors.textSecondary,
-        fontSize: 12,
-        fontWeight: '600',
-    },
 });

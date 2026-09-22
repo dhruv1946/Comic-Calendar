@@ -144,7 +144,7 @@ export default function Search() {
                             }
                         } catch { /* skip */ }
                     },
-                    2,
+                    1, // Sequential — 1 at a time to stay well clear of rate limits
                 );
             }
 
@@ -170,6 +170,7 @@ export default function Search() {
             setLoading(true);
             const user = auth.currentUser;
             if (!user) {
+                setLoading(false);
                 Alert.alert('Error', 'You must be logged in to add series.');
                 return;
             }
@@ -178,6 +179,7 @@ export default function Search() {
                 query(collection(db, 'series'), where('user_id', '==', user.uid), where('metron_id', '==', item.id)),
             );
             if (!dupSnap.empty) {
+                setLoading(false);
                 Alert.alert('Already Tracked', 'This series is already in your list!');
                 return;
             }
