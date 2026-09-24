@@ -1,6 +1,10 @@
 /**
- * Metron API helper — centralizes authentication, request handling,
+ * Metron API helper — centralizes request handling,
  * rate-limit compliance, and persistent caching.
+ *
+ * SECURITY: The client NEVER handles Metron credentials.
+ * All requests route through scripts/cors-proxy.js which injects
+ * credentials server-side. The APK bundle contains zero secrets.
  *
  * CRITICAL: Metron enforces strict rate limits. This module:
  *   • Never retries 429 responses (backs off and gives up)
@@ -11,22 +15,33 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { encode } from 'base-64';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { Config } from './config';
-
-const METRON_USER = Config.METRON_USER;
-const METRON_PASS = Config.METRON_PASS;
-
-// On web, route through local CORS proxy (scripts/cors-proxy.js).
-// On mobile, fetch directly.
-const METRON_ORIGIN = 'https://metron.cloud/api';
-const LOCAL_PROXY = 'http://localhost:3001/api';
-const IS_WEB = Platform.OS === 'web';
-const BASE_URL = IS_WEB ? LOCAL_PROXY : METRON_ORIGIN;
 
 const DEFAULT_TIMEOUT_MS = 10000;
 const BATCH_DELAY_MS = 1500; // 1.5s between requests — be gentle
+
+// ── Proxy URL resolution ──
+// All platforms route through the dev proxy (scripts/cors-proxy.js).
+// The proxy injects Metron credentials server-side — the client sends zero secrets.
+const PROXY_PORT = 3001;
+
+function getProxyBaseUrl(): string {
+    if (Platform.OS === 'web') {
+        return `http://localhost:${PROXY_PORT}/api`;
+    }
+    // On native, derive the host from Expo's dev server URI
+    // (e.g., '192.168.1.100:8081' → '192.168.1.100')
+    const hostUri = Constants.expoConfig?.hostUri;
+    if (hostUri) {
+        const host = hostUri.split(':')[0];
+        return `http://${host}:${PROXY_PORT}/api`;
+    }
+    // Fallback — Android emulator's alias for host loopback
+    return `http://10.0.2.2:${PROXY_PORT}/api`;
+}
+
+const BASE_URL = getProxyBaseUrl();
 
 // ── Cache TTLs ──
 const COVER_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;  // 7 days (covers rarely change)
@@ -46,12 +61,6 @@ function delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Pre-computed once at module load — no reason to re-encode on every request
-const AUTH_HEADERS: Record<string, string> = {
-    'Authorization': 'Basic ' + encode(`${METRON_USER}:${METRON_PASS}`),
-    'Content-Type': 'application/json',
-};
-
 // ── Persistent cache helpers ──
 async function getCached<T>(key: string): Promise<{ data: T; ts: number } | null> {
     try {
@@ -68,7 +77,8 @@ async function setCache(key: string, data: any): Promise<void> {
 }
 
 /**
- * Core fetch — respects rate limits, reads headers, never retries 429.
+ * Core fetch — routes through the proxy, respects rate limits, never retries 429.
+ * No credentials are sent from the client — the proxy injects them server-side.
  */
 export async function metronFetch(path: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
     // If we're rate-limited, wait or fail
@@ -94,7 +104,7 @@ export async function metronFetch(path: string, timeoutMs = DEFAULT_TIMEOUT_MS):
 
     try {
         const response = await fetch(`${BASE_URL}${path}`, {
-            headers: AUTH_HEADERS,
+            headers: { 'Content-Type': 'application/json' },
             signal: controller.signal,
         });
         clearTimeout(id);
