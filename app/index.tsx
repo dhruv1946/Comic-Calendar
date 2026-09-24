@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { Link, useFocusEffect } from 'expo-router';
 import { sendEmailVerification } from 'firebase/auth';
 import { collection, deleteDoc, doc, getDocs, orderBy, query, updateDoc, where } from 'firebase/firestore';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { batchParallel, fetchIssueCover, fetchIssueDate, clearDateCache } from '../constants/metron';
 import { scheduleReleaseNotifications } from '../constants/notifications';
@@ -32,12 +32,29 @@ export default function Home() {
     const [emailVerified, setEmailVerified] = useState(true);
     const [bannerDismissed, setBannerDismissed] = useState(false);
 
+    const hasInitiallyLoaded = useRef(false);
+    const needsRefreshOnFocus = useRef(false);
+
     useFocusEffect(
         useCallback(() => {
             checkEmailVerification();
-            fetchPullList();
+            // On first load, always fetch. On subsequent focus events,
+            // only re-fetch if data may have changed (e.g., returned from Search after adding a series).
+            if (!hasInitiallyLoaded.current || needsRefreshOnFocus.current) {
+                hasInitiallyLoaded.current = true;
+                needsRefreshOnFocus.current = false;
+                fetchPullList();
+            }
         }, [])
     );
+
+    // Listen for navigation back from Search — mark that a refresh is needed
+    // since the user may have added a new series
+    useEffect(() => {
+        // Any series state change (add/remove) already updates local state,
+        // but we also want to re-fetch dates for newly added series
+        needsRefreshOnFocus.current = true;
+    }, [series.length]);
 
     const checkEmailVerification = async () => {
         const user = auth.currentUser;
