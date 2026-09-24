@@ -322,8 +322,18 @@ export async function batchParallel<T, R>(
     const results: R[] = [];
     for (let i = 0; i < items.length; i += batchSize) {
         const batch = items.slice(i, i + batchSize);
-        const batchResults = await Promise.all(batch.map(fn));
-        results.push(...batchResults);
+        const batchResults = await Promise.all(
+            batch.map(async (item) => {
+                try {
+                    return await fn(item);
+                } catch (error) {
+                    console.error('Batch item failed:', error);
+                    return null as unknown as R;
+                }
+            })
+        );
+        // Filter out failures so callers only get successful results
+        results.push(...batchResults.filter((res) => res !== null));
         if (i + batchSize < items.length) {
             await delay(BATCH_DELAY_MS);
         }

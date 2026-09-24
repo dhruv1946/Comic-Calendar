@@ -204,11 +204,13 @@ export default function Home() {
                     const result = await fetchIssueDate(s.metron_id!);
                     if (result) {
                         dateAcc[s.id] = result;
-                        setNextIssueDates((prev) => ({ ...prev, [s.id]: result }));
                     }
                 },
                 1, // Sequential — respect rate limits
             );
+
+            // Single batched state update at the end to prevent performance waterfalls
+            setNextIssueDates(dateAcc);
 
             // Single batched write to AsyncStorage at the end of the entire batch
             await AsyncStorage.setItem(

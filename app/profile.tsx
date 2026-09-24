@@ -5,8 +5,9 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Colors, SharedStyles } from '../constants/styles';
-import { sendTestNotification } from '../constants/notifications';
-import { auth } from '../firebase';
+import { sendTestNotification, scheduleReleaseNotifications } from '../constants/notifications';
+import { auth, db } from '../firebase';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 
 export default function Profile() {
     const [name, setName] = useState('');
@@ -47,6 +48,22 @@ export default function Profile() {
             setNotificationTime(selectedDate);
             try {
                 await AsyncStorage.setItem('notificationTime', selectedDate.toISOString());
+                
+                // Immediately reschedule all notifications with the new time
+                const user = auth.currentUser;
+                if (user) {
+                    const seriesQuery = query(collection(db, 'series'), where('user_id', '==', user.uid));
+                    const snapshot = await getDocs(seriesQuery);
+                    const pullList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    
+                    const rawDates = await AsyncStorage.getItem('comic_calendar_issue_dates_v2');
+                    const datesMap = rawDates ? JSON.parse(rawDates).data : {};
+                    
+                    await scheduleReleaseNotifications(pullList, datesMap, { 
+                        hours: selectedDate.getHours(), 
+                        minutes: selectedDate.getMinutes() 
+                    });
+                }
             } catch (e) {
                 console.error('Failed to save time', e);
             }
