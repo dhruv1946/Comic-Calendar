@@ -5,7 +5,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Colors, SharedStyles } from '../constants/styles';
-import { sendTestNotification, scheduleReleaseNotifications } from '../constants/notifications';
+import { scheduleReleaseNotifications } from '../constants/notifications';
 import { auth, db } from '../firebase';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 
@@ -154,9 +154,7 @@ export default function Profile() {
                     </>
                 )}
                 
-                <TouchableOpacity style={[SharedStyles.secondaryButton, { marginTop: 10 }]} onPress={sendTestNotification}>
-                    <Text style={SharedStyles.secondaryButtonText}>Send Test Notification</Text>
-                </TouchableOpacity>
+
             </View>
 
             <TouchableOpacity style={styles.logoutButton} onPress={handleSignOut}>

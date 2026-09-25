@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { addDoc, collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { Image } from 'expo-image';
 import { batchParallel, fetchIssueCover, searchSeries } from '../constants/metron';
 import { Colors, SharedStyles } from '../constants/styles';
 import { auth, db } from '../firebase';
@@ -95,7 +95,7 @@ export default function Search() {
 
     const clearHistory = async () => {
         setHistory([]);
-        await AsyncStorage.removeItem(HISTORY_KEY).catch(() => {});
+        await AsyncStorage.removeItem(HISTORY_KEY).catch(() => { });
     };
 
     const handleSearch = async (overrideQuery?: string) => {
@@ -197,7 +197,7 @@ export default function Search() {
                 created_at: Timestamp.now(),
             });
 
-            Alert.alert('Added!', `${item.name || 'Series'} added to your Pull List.`, [
+            Alert.alert('Great Choice!', `${item.name || 'Series'} added to your Pull List.\n\nPull down to fetch date.`, [
                 { text: 'OK', onPress: () => router.replace('/') },
             ]);
         } catch (error) {
