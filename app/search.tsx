@@ -74,15 +74,17 @@ export default function Search() {
                 timestamp: Date.now(),
             };
 
-            // Deduplicate by query and keep latest 2 searches
-            const prev = historyRef.current;
-            const updated = [
-                entry,
-                ...prev.filter((h) => h.query.toLowerCase() !== searchQuery.trim().toLowerCase()),
-            ].slice(0, 2);
-
-            setHistory(updated);
-            await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+            setHistory((prevHistory) => {
+                const updated = [
+                    entry,
+                    ...prevHistory.filter((h) => h.query.toLowerCase() !== searchQuery.trim().toLowerCase()),
+                ].slice(0, 2);
+                
+                // Fire and forget storage update
+                AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(updated)).catch(() => {});
+                
+                return updated;
+            });
         } catch { /* non-critical */ }
     };
 
@@ -96,6 +98,14 @@ export default function Search() {
     const clearHistory = async () => {
         setHistory([]);
         await AsyncStorage.removeItem(HISTORY_KEY).catch(() => { });
+    };
+
+    const removeHistoryEntry = (queryToRemove: string) => {
+        setHistory((prevHistory) => {
+            const updated = prevHistory.filter(h => h.query !== queryToRemove);
+            AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(updated)).catch(() => {});
+            return updated;
+        });
     };
 
     const handleSearch = async (overrideQuery?: string) => {
@@ -259,11 +269,14 @@ export default function Search() {
                     </View>
                     {history.map((entry) => (
                         <View key={entry.query + entry.timestamp} style={{ marginBottom: 20 }}>
-                            <TouchableOpacity style={styles.historyQueryRow} onPress={() => replaySearch(entry.query)}>
-                                <Text style={styles.historyIcon}>🔍</Text>
-                                <Text style={styles.historyQueryText} numberOfLines={1}>{entry.query}</Text>
-                                <Text style={styles.historyArrow}>→</Text>
-                            </TouchableOpacity>
+                            <View style={styles.historyQueryRow}>
+                                <TouchableOpacity style={{ flex: 1 }} onPress={() => replaySearch(entry.query)}>
+                                    <Text style={styles.historyQueryText} numberOfLines={1}>{entry.query}</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => removeHistoryEntry(entry.query)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                                    <Text style={styles.historyArrow}>✕</Text>
+                                </TouchableOpacity>
+                            </View>
                             <View style={styles.historyCardsRow}>
                                 {entry.results.map((item) => (
                                     <TouchableOpacity
