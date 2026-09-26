@@ -6,6 +6,8 @@ import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { Colors } from '../constants/styles';
 import { auth } from '../firebase';
 import { requestNotificationPermissions } from '../constants/notifications';
+import { ThemeProvider, useAppTheme } from '../hooks/useTheme';
+import { ThemedAlertProvider } from '../components/ThemedAlertProvider';
 
 // ── Error Boundary ───────────────────────────────────────────────────
 // Expo Router uses this export to wrap screens automatically
@@ -30,6 +32,26 @@ export function ErrorBoundary({ error, retry }: { error: Error; retry: () => voi
 }
 
 // ── Root Layout ──────────────────────────────────────────────────────
+function RootLayoutNav() {
+    const { colors } = useAppTheme();
+    return (
+        <ThemedAlertProvider>
+            <Stack
+                screenOptions={{
+                    headerStyle: { backgroundColor: colors.surface },
+                    headerTintColor: colors.onSurface,
+                    contentStyle: { backgroundColor: colors.background },
+                }}
+            >
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="login" options={{ headerShown: false }} />
+                <Stack.Screen name="signup" options={{ headerShown: false }} />
+                <Stack.Screen name="profile" options={{ title: 'Your Profile', presentation: 'modal' }} />
+            </Stack>
+        </ThemedAlertProvider>
+    );
+}
+
 export default function Layout() {
     const router = useRouter();
     const segments = useSegments();
@@ -68,43 +90,8 @@ export default function Layout() {
     }
 
     return (
-        <Stack
-            screenOptions={{
-                headerStyle: { backgroundColor: '#1a1a1a' },
-                headerTintColor: Colors.textPrimary,
-                contentStyle: { backgroundColor: Colors.background },
-            }}
-        >
-            <Stack.Screen
-                name="index"
-                options={{
-                    title: 'My Pull List',
-                    headerRight: () => (
-                        <Link href="/profile" asChild>
-                            <TouchableOpacity style={{ marginRight: 15 }}>
-                                <Text style={{ color: Colors.primary, fontWeight: 'bold' }}>Profile</Text>
-                            </TouchableOpacity>
-                        </Link>
-                    )
-                }}
-            />
-            <Stack.Screen
-                name="search"
-                options={{
-                    title: 'Search Database',
-                    headerLeft: () => (
-                        <TouchableOpacity
-                            onPress={() => router.replace('/')}
-                            style={{ padding: 6, marginRight: 8 }}
-                        >
-                            <Ionicons name="chevron-back" size={24} color={Colors.textPrimary} />
-                        </TouchableOpacity>
-                    ),
-                }}
-            />
-            <Stack.Screen name="login" options={{ headerShown: false }} />
-            <Stack.Screen name="signup" options={{ headerShown: false }} />
-            <Stack.Screen name="profile" options={{ title: 'Your Profile', presentation: 'modal' }} />
-        </Stack>
+        <ThemeProvider>
+            <RootLayoutNav />
+        </ThemeProvider>
     );
 }

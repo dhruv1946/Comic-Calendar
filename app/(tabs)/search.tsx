@@ -3,10 +3,12 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { addDoc, collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { batchParallel, fetchIssueCover, searchSeries } from '../constants/metron';
-import { Colors, SharedStyles } from '../constants/styles';
-import { auth, db } from '../firebase';
+import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useThemedAlert } from '../../components/ThemedAlertProvider';
+import { batchParallel, fetchIssueCover, searchSeries } from '../../constants/metron';
+import { Colors, SharedStyles } from '../../constants/styles';
+import { auth, db } from '../../firebase';
+import { useAppTheme } from '../../hooks/useTheme';
 
 const HISTORY_KEY = 'comic_cal_search_history';
 
@@ -28,6 +30,8 @@ interface HistoryEntry {
 }
 
 export default function Search() {
+    const { colors } = useAppTheme();
+    const { showAlert } = useThemedAlert();
     const [queryText, setQueryText] = useState('');
     const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(false);
@@ -51,7 +55,9 @@ export default function Search() {
                 const raw = await AsyncStorage.getItem(HISTORY_KEY);
                 if (raw) {
                     const parsed = JSON.parse(raw);
-                    setHistory(parsed);
+                    if (Array.isArray(parsed)) {
+                        setHistory(parsed.filter(entry => entry && typeof entry === 'object' && Array.isArray(entry.results)));
+                    }
                 }
             } catch { /* ignore */ }
         })();
@@ -79,10 +85,10 @@ export default function Search() {
                     entry,
                     ...prevHistory.filter((h) => h.query.toLowerCase() !== searchQuery.trim().toLowerCase()),
                 ].slice(0, 2);
-                
+
                 // Fire and forget storage update
-                AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(updated)).catch(() => {});
-                
+                AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(updated)).catch(() => { });
+
                 return updated;
             });
         } catch { /* non-critical */ }
@@ -103,7 +109,7 @@ export default function Search() {
     const removeHistoryEntry = (queryToRemove: string) => {
         setHistory((prevHistory) => {
             const updated = prevHistory.filter(h => h.query !== queryToRemove);
-            AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(updated)).catch(() => {});
+            AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(updated)).catch(() => { });
             return updated;
         });
     };
@@ -166,7 +172,7 @@ export default function Search() {
             await saveToHistory(searchText, withCovers);
         } catch (error: any) {
             console.error('Search error:', error);
-            Alert.alert(
+            showAlert(
                 'Database Offline',
                 'The comic database is currently experiencing issues. Please try again later.',
             );
@@ -181,7 +187,7 @@ export default function Search() {
             const user = auth.currentUser;
             if (!user) {
                 setLoading(false);
-                Alert.alert('Error', 'You must be logged in to add series.');
+                showAlert('Error', 'You must be logged in to add series.');
                 return;
             }
 
@@ -190,7 +196,7 @@ export default function Search() {
             );
             if (!dupSnap.empty) {
                 setLoading(false);
-                Alert.alert('Already Tracked', 'This series is already in your list!');
+                showAlert('Already Tracked', 'This series is already in your list!');
                 return;
             }
 
@@ -207,12 +213,12 @@ export default function Search() {
                 created_at: Timestamp.now(),
             });
 
-            Alert.alert('Great Choice!', `${item.name || 'Series'} added to your Pull List.\n\nPull down to fetch date.`, [
+            showAlert('Great Choice!', `${item.name || 'Series'} added to your Pull List.\n\nPull down to fetch date.`, [
                 { text: 'OK', onPress: () => router.replace('/') },
             ]);
         } catch (error) {
             console.error(error);
-            Alert.alert('Error', 'Failed to fetch cover art or save series.');
+            showAlert('Error', 'Failed to fetch cover art or save series.');
         } finally {
             setLoading(false);
         }
@@ -231,60 +237,60 @@ export default function Search() {
     const showHistory = !hasSearched && !loading && results.length === 0 && history.length > 0;
 
     return (
-        <View style={styles.container}>
+        <View collapsable={false} style={[styles.container, { backgroundColor: colors.background }]}>
             {/* Search bar */}
             <View style={styles.searchHeader}>
                 <View style={styles.inputWrapper}>
                     <TextInput
                         ref={inputRef}
-                        style={styles.input}
+                        style={[styles.input, { backgroundColor: colors.surfaceContainer, color: colors.onSurface, borderColor: colors.outline }]}
                         placeholder="Search for a comic series..."
-                        placeholderTextColor={Colors.textSecondary}
+                        placeholderTextColor={colors.onSurfaceVariant}
                         value={queryText}
                         onChangeText={setQueryText}
                         onSubmitEditing={() => handleSearch()}
                     />
                     {queryText.length > 0 && (
-                        <TouchableOpacity style={styles.clearBtn} onPress={clearSearch}>
-                            <Text style={styles.clearBtnText}>✕</Text>
+                        <TouchableOpacity style={[styles.clearBtn, { backgroundColor: colors.surfaceContainerHigh }]} onPress={clearSearch}>
+                            <Text style={[styles.clearBtnText, { color: colors.onSurfaceVariant }]}>✕</Text>
                         </TouchableOpacity>
                     )}
                 </View>
-                <TouchableOpacity style={styles.searchBtn} onPress={() => handleSearch()} disabled={loading}>
-                    <Text style={SharedStyles.buttonText}>Search</Text>
+                <TouchableOpacity style={[styles.searchBtn, { backgroundColor: colors.primary }]} onPress={() => handleSearch()} disabled={loading}>
+                    <Text style={[SharedStyles.buttonText, { color: colors.onPrimary }]}>Search</Text>
                 </TouchableOpacity>
             </View>
 
             {/* Body */}
             {loading ? (
-                <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 40 }} />
+                <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
             ) : showHistory ? (
                 /* ── Recent searches ── */
                 <ScrollView style={styles.historyContainer}>
                     <View style={styles.historyHeader}>
-                        <Text style={styles.historyTitle}>Recent Searches</Text>
+                        <Text style={[styles.historyTitle, { color: colors.onSurfaceVariant }]}>Recent Searches</Text>
                         <TouchableOpacity onPress={clearHistory}>
-                            <Text style={styles.clearHistoryText}>Clear</Text>
+                            <Text style={[styles.clearHistoryText, { color: colors.primary }]}>Clear</Text>
                         </TouchableOpacity>
                     </View>
                     {history.map((entry) => (
                         <View key={entry.query + entry.timestamp} style={{ marginBottom: 20 }}>
                             <View style={styles.historyQueryRow}>
                                 <TouchableOpacity style={{ flex: 1 }} onPress={() => replaySearch(entry.query)}>
-                                    <Text style={styles.historyQueryText} numberOfLines={1}>{entry.query}</Text>
+                                    <Text style={[styles.historyQueryText, { color: colors.onSurface }]} numberOfLines={1}>{entry.query}</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity onPress={() => removeHistoryEntry(entry.query)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                                    <Text style={styles.historyArrow}>✕</Text>
+                                    <Text style={[styles.historyArrow, { color: colors.onSurfaceVariant }]}>✕</Text>
                                 </TouchableOpacity>
                             </View>
                             <View style={styles.historyCardsRow}>
-                                {entry.results.map((item) => (
+                                {(entry.results || []).map((item) => (
                                     <TouchableOpacity
                                         key={`h-${item.id}`}
-                                        style={styles.historyCard}
+                                        style={[styles.historyCard, { backgroundColor: colors.surfaceContainer }]}
                                         onPress={() => addSeries(item)}
                                     >
-                                        <View style={styles.historyImage}>
+                                        <View style={[styles.historyImage, { backgroundColor: colors.surfaceContainerHighest }]}>
                                             {item.image_url ? (
                                                 <Image
                                                     source={{ uri: item.image_url }}
@@ -294,10 +300,10 @@ export default function Search() {
                                                     cachePolicy="memory-disk"
                                                 />
                                             ) : (
-                                                <Text style={{ color: Colors.textMuted, fontSize: 11 }}>No Cover</Text>
+                                                <Text style={{ color: colors.onSurfaceVariant, fontSize: 11 }}>No Cover</Text>
                                             )}
                                         </View>
-                                        <Text style={styles.historyItemName} numberOfLines={2}>
+                                        <Text style={[styles.historyItemName, { color: colors.onSurface }]} numberOfLines={2}>
                                             {item.name || 'Unknown'}
                                         </Text>
                                     </TouchableOpacity>
@@ -307,14 +313,13 @@ export default function Search() {
                     ))}
                 </ScrollView>
             ) : (
-                /* ── Search results grid ── */
                 <FlatList
                     data={results}
                     keyExtractor={(item) => item.id.toString()}
                     numColumns={2}
                     columnWrapperStyle={{ justifyContent: 'space-between', paddingHorizontal: 10 }}
                     renderItem={({ item }) => (
-                        <TouchableOpacity style={SharedStyles.gridCard} onPress={() => addSeries(item)}>
+                        <TouchableOpacity style={[SharedStyles.gridCard, { backgroundColor: colors.surfaceContainer }]} onPress={() => addSeries(item)}>
                             <View style={SharedStyles.imagePlaceholder}>
                                 {item.image_url ? (
                                     <Image
@@ -326,14 +331,14 @@ export default function Search() {
                                         recyclingKey={`search-${item.id}`}
                                     />
                                 ) : (
-                                    <Text style={{ color: Colors.textMuted }}>No Cover</Text>
+                                    <Text style={{ color: colors.onSurfaceVariant }}>No Cover</Text>
                                 )}
                             </View>
-                            <View style={styles.cardTextContainer}>
-                                <Text style={SharedStyles.gridTitle} numberOfLines={2}>
+                            <View style={[styles.cardTextContainer, { backgroundColor: colors.surfaceContainer }]}>
+                                <Text style={[SharedStyles.gridTitle, { color: colors.onSurface }]} numberOfLines={2}>
                                     {item.name || 'Unknown'}
                                 </Text>
-                                <Text style={styles.gridSubText}>{item.year_began}</Text>
+                                <Text style={[styles.gridSubText, { color: colors.onSurfaceVariant }]}>{item.year_began}</Text>
                             </View>
                         </TouchableOpacity>
                     )}
@@ -379,12 +384,12 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         borderRadius: 8,
     },
-    cardTextContainer: { padding: 10, minHeight: 70, backgroundColor: Colors.surface },
+    cardTextContainer: { flex: 1, padding: 10, minHeight: 70, backgroundColor: Colors.surface },
     gridSubText: { color: Colors.textSecondary, fontSize: 11, marginTop: 4 },
     emptyText: { color: Colors.textSecondary, textAlign: 'center', marginTop: 40 },
 
     // ── History ──
-    historyContainer: { paddingHorizontal: 5 },
+    historyContainer: { flex: 1, paddingHorizontal: 5 },
     historyHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',

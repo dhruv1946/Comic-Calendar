@@ -119,6 +119,7 @@ export const SharedStyles = StyleSheet.create({
         height: '100%',
     },
     textContainer: {
+        flex: 1,
         padding: 10,
         minHeight: 50,
         backgroundColor: Colors.surface,

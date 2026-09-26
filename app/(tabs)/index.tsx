@@ -4,11 +4,13 @@ import { Link, useFocusEffect } from 'expo-router';
 import { sendEmailVerification } from 'firebase/auth';
 import { collection, deleteDoc, doc, getDocs, orderBy, query, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { batchParallel, fetchIssueCover, fetchIssueDate, clearDateCache } from '../constants/metron';
-import { scheduleReleaseNotifications } from '../constants/notifications';
-import { Colors, SharedStyles } from '../constants/styles';
-import { auth, db } from '../firebase';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { batchParallel, fetchIssueCover, fetchIssueDate, clearDateCache } from '../../constants/metron';
+import { scheduleReleaseNotifications } from '../../constants/notifications';
+import { Colors, SharedStyles } from '../../constants/styles';
+import { useAppTheme } from '../../hooks/useTheme';
+import { useThemedAlert } from '../../components/ThemedAlertProvider';
+import { auth, db } from '../../firebase';
 
 const ISSUE_DATES_CACHE_KEY = 'comic_calendar_issue_dates_v2';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
@@ -23,6 +25,8 @@ interface Series {
 }
 
 export default function Home() {
+    const { colors } = useAppTheme();
+    const { showAlert } = useThemedAlert();
     const [series, setSeries] = useState<Series[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshingDates, setRefreshingDates] = useState(false);
@@ -69,9 +73,9 @@ export default function Home() {
         if (user) {
             try {
                 await sendEmailVerification(user);
-                Alert.alert('Email Sent', 'Verification email has been resent. Check your inbox.');
+                showAlert('Email Sent', 'Verification email has been resent. Check your inbox.');
             } catch {
-                Alert.alert('Error', 'Could not send verification email. Please try again later.');
+                showAlert('Error', 'Could not send verification email. Please try again later.');
             }
         }
     };
@@ -250,7 +254,7 @@ export default function Home() {
     };
 
     const removeSeries = useCallback((id: string, title: string) => {
-        Alert.alert(
+        showAlert(
             "Remove Comic",
             `Are you sure you want to drop "${title}" from your Pull List?`,
             [
@@ -264,13 +268,13 @@ export default function Home() {
                             setSeries((prevSeries) => prevSeries.filter((item) => item.id !== id));
                         } catch (error) {
                             console.error('Error deleting series:', error);
-                            Alert.alert('Error', 'Could not remove the series from your list.');
+                            showAlert('Error', 'Could not remove the series from your list.');
                         }
                     }
                 }
             ]
         );
-    }, []);
+    }, [showAlert]);
 
     const renderItem = useCallback(({ item }: { item: Series }) => {
         const dates = nextIssueDatesRef.current;
@@ -290,19 +294,18 @@ export default function Home() {
                     <Text style={{ color: Colors.textMuted }}>No Cover</Text>
                 )}
                 <TouchableOpacity
-                    style={SharedStyles.deleteButton}
+                    style={[SharedStyles.deleteButton, { backgroundColor: colors.primary }]}
                     onPress={() => removeSeries(item.id, item.title)}
                 >
-                    <Text style={SharedStyles.deleteButtonText}>✕</Text>
+                    <Text style={[SharedStyles.deleteButtonText, { color: colors.onPrimary }]}>✕</Text>
                 </TouchableOpacity>
             </View>
-            <View style={SharedStyles.textContainer}>
-                <Text style={SharedStyles.gridTitle} numberOfLines={2}>
+            <View style={[SharedStyles.textContainer, { backgroundColor: colors.surfaceContainer }]}>
+                <Text style={[SharedStyles.gridTitle, { color: colors.onSurface }]} numberOfLines={2}>
                     {item.title}
                 </Text>
                 <Text style={[
-                    styles.nextIssueDate,
-                    dates[item.id]?.label === 'latest' && styles.latestIssueDate,
+                    styles.nextIssueDate, { color: colors.primary, fontWeight: '600' }
                 ]}>
                     {dates[item.id]
                         ? `${dates[item.id].label === 'next' ? 'Next' : 'Latest'}: ${new Date(dates[item.id].date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
@@ -311,34 +314,34 @@ export default function Home() {
             </View>
         </View>
         );
-    }, [removeSeries]);
+    }, [colors, removeSeries]);
 
     const keyExtractor = useCallback((item: Series) => item.id, []);
 
     const showBanner = !emailVerified && !bannerDismissed;
 
     return (
-        <View style={SharedStyles.screenContainer}>
+        <View style={[SharedStyles.screenContainer, { backgroundColor: colors.background }]}>
             {showBanner && (
-                <View style={styles.verificationBanner}>
+                <View style={[styles.verificationBanner, { backgroundColor: colors.tertiaryContainer, borderBottomColor: colors.outlineVariant }]}>
                     <View style={styles.bannerContent}>
-                        <Text style={styles.bannerText}>📧 Please verify your email</Text>
+                        <Text style={[styles.bannerText, { color: colors.onTertiaryContainer }]}>📧 Please verify your email</Text>
                         <TouchableOpacity onPress={handleResendVerification}>
-                            <Text style={styles.resendText}>Resend</Text>
+                            <Text style={[styles.resendText, { color: colors.tertiary }]}>Resend</Text>
                         </TouchableOpacity>
                     </View>
                     <TouchableOpacity onPress={() => setBannerDismissed(true)} style={styles.bannerClose}>
-                        <Text style={styles.bannerCloseText}>✕</Text>
+                        <Text style={[styles.bannerCloseText, { color: colors.onTertiaryContainer }]}>✕</Text>
                     </TouchableOpacity>
                 </View>
             )}
 
             {loading ? (
-                <ActivityIndicator size="large" color={Colors.textPrimary} style={{ marginTop: 50 }} />
+                <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 50 }} />
             ) : series.length === 0 ? (
                 <View style={styles.emptyState}>
-                    <Text style={styles.emptyText}>Your Pull List is empty.</Text>
-                    <Text style={styles.subText}>Tap the button below to start tracking.</Text>
+                    <Text style={[styles.emptyText, { color: colors.onSurface }]}>Your Pull List is empty.</Text>
+                    <Text style={[styles.subText, { color: colors.onSurfaceVariant }]}>Tap the search icon below to start tracking.</Text>
                 </View>
             ) : (
                 <FlatList
@@ -358,11 +361,6 @@ export default function Home() {
                 />
             )}
 
-            <Link href="/search" asChild>
-                <TouchableOpacity style={styles.fab}>
-                    <Text style={styles.fabText}>+ Add Series</Text>
-                </TouchableOpacity>
-            </Link>
         </View>
     );
 }
