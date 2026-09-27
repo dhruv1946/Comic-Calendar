@@ -149,7 +149,7 @@ export default function Profile() {
                 ) : (
                     <>
                         <TouchableOpacity style={[SharedStyles.input, { justifyContent: 'center', borderColor: colors.outline, backgroundColor: colors.surfaceContainer }]} onPress={() => setShowPicker(true)}>
-                            <Text style={{ color: colors.onSurface, fontSize: 16 }}>
+                            <Text style={{ color: colors.onSurface, fontSize: 16, fontFamily: 'PlusJakartaSans_400Regular' }}>
                                 {notificationTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </Text>
                         </TouchableOpacity>
@@ -187,7 +187,8 @@ export default function Profile() {
                             <Text style={{ 
                                 color: colorMode === mode ? colors.onPrimary : colors.onSurface,
                                 textTransform: 'capitalize',
-                                fontWeight: '600'
+                                fontWeight: '600',
+                                fontFamily: 'PlusJakartaSans_700Bold'
                             }}>
                                 {mode}
                             </Text>
@@ -244,7 +245,8 @@ export default function Profile() {
                                     marginTop: 8,
                                     color: preference === pref ? colors.primary : colors.onSurfaceVariant,
                                     fontSize: 12,
-                                    fontWeight: preference === pref ? 'bold' : 'normal'
+                                    fontWeight: preference === pref ? 'bold' : 'normal',
+                                    fontFamily: preference === pref ? 'PlusJakartaSans_700Bold' : 'PlusJakartaSans_400Regular'
                                 }}>
                                     {label}
                                 </Text>
@@ -279,11 +281,11 @@ const styles = StyleSheet.create({
         borderWidth: 2,
         borderColor: Colors.border,
     },
-    avatarInitial: { color: '#fff', fontSize: 48, fontWeight: 'bold' },
-    emailText: { color: Colors.textSecondary, fontSize: 14, marginTop: 12 },
+    avatarInitial: { color: '#fff', fontSize: 48, fontWeight: 'bold', fontFamily: 'PlusJakartaSans_700Bold' },
+    emailText: { color: Colors.textSecondary, fontSize: 14, marginTop: 12, fontFamily: 'PlusJakartaSans_400Regular' },
     inputSection: { gap: 10 },
     pickerContainer: { alignItems: 'center', backgroundColor: Colors.surface, borderRadius: 8, overflow: 'hidden' },
-    label: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600', marginLeft: 4 },
+    label: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600', marginLeft: 4, fontFamily: 'PlusJakartaSans_700Bold' },
     logoutButton: { marginTop: 20, marginBottom: 20, padding: 16, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: Colors.primary },
-    logoutText: { color: Colors.primary, fontWeight: 'bold', fontSize: 16 },
+    logoutText: { color: Colors.primary, fontWeight: 'normal', fontSize: 16, fontFamily: 'SpaceGrotesk_700Bold' },
 });

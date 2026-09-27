@@ -43,12 +43,14 @@ export const SharedStyles = StyleSheet.create({
         color: Colors.textPrimary,
         fontSize: 24,
         fontWeight: 'bold',
+        fontFamily: 'PlusJakartaSans_700Bold',
         textAlign: 'center',
         marginBottom: 10,
     },
     subText: {
         color: Colors.textSecondary,
         fontSize: 14,
+        fontFamily: 'PlusJakartaSans_400Regular',
         textAlign: 'center',
         marginBottom: 30,
         paddingHorizontal: 20,
@@ -62,6 +64,7 @@ export const SharedStyles = StyleSheet.create({
     input: {
         backgroundColor: Colors.surface,
         color: Colors.textPrimary,
+        fontFamily: 'PlusJakartaSans_400Regular',
         paddingHorizontal: 15,
         paddingVertical: 14,
         borderRadius: 8,
@@ -89,12 +92,14 @@ export const SharedStyles = StyleSheet.create({
     },
     buttonText: {
         color: 'white',
-        fontWeight: 'bold',
+        fontWeight: 'normal',
+        fontFamily: 'SpaceGrotesk_700Bold',
         fontSize: 16,
     },
     secondaryButtonText: {
         color: Colors.primary,
-        fontWeight: 'bold',
+        fontWeight: 'normal',
+        fontFamily: 'SpaceGrotesk_700Bold',
         fontSize: 16,
     },
 
@@ -128,6 +133,7 @@ export const SharedStyles = StyleSheet.create({
         color: Colors.textPrimary,
         fontSize: 13,
         fontWeight: 'bold',
+        fontFamily: 'PlusJakartaSans_700Bold',
         lineHeight: 18,
     },
 
@@ -149,6 +155,7 @@ export const SharedStyles = StyleSheet.create({
         color: Colors.primary,
         fontSize: 14,
         fontWeight: 'bold',
+        fontFamily: 'PlusJakartaSans_700Bold',
         marginTop: -2,
     },
 });

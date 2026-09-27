@@ -244,7 +244,7 @@ export default function Search() {
                     <TextInput
                         ref={inputRef}
                         style={[styles.input, { backgroundColor: colors.surfaceContainer, color: colors.onSurface, borderColor: colors.outline }]}
-                        placeholder="Search for a comic series..."
+                        placeholder="Search for an ongoing run..."
                         placeholderTextColor={colors.onSurfaceVariant}
                         value={queryText}
                         onChangeText={setQueryText}
@@ -300,7 +300,7 @@ export default function Search() {
                                                     cachePolicy="memory-disk"
                                                 />
                                             ) : (
-                                                <Text style={{ color: colors.onSurfaceVariant, fontSize: 11 }}>No Cover</Text>
+                                                <Text style={{ color: colors.onSurfaceVariant, fontSize: 11, fontFamily: 'PlusJakartaSans_400Regular' }}>No Cover</Text>
                                             )}
                                         </View>
                                         <Text style={[styles.historyItemName, { color: colors.onSurface }]} numberOfLines={2}>
@@ -331,7 +331,7 @@ export default function Search() {
                                         recyclingKey={`search-${item.id}`}
                                     />
                                 ) : (
-                                    <Text style={{ color: colors.onSurfaceVariant }}>No Cover</Text>
+                                    <Text style={{ color: colors.onSurfaceVariant, fontFamily: 'PlusJakartaSans_400Regular' }}>No Cover</Text>
                                 )}
                             </View>
                             <View style={[styles.cardTextContainer, { backgroundColor: colors.surfaceContainer }]}>
@@ -377,7 +377,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    clearBtnText: { color: Colors.textSecondary, fontSize: 12, fontWeight: 'bold' },
+    clearBtnText: { color: Colors.textSecondary, fontSize: 12, fontWeight: 'bold', fontFamily: 'PlusJakartaSans_700Bold' },
     searchBtn: {
         backgroundColor: Colors.primary,
         justifyContent: 'center',
@@ -385,8 +385,8 @@ const styles = StyleSheet.create({
         borderRadius: 8,
     },
     cardTextContainer: { flex: 1, padding: 10, minHeight: 70, backgroundColor: Colors.surface },
-    gridSubText: { color: Colors.textSecondary, fontSize: 11, marginTop: 4 },
-    emptyText: { color: Colors.textSecondary, textAlign: 'center', marginTop: 40 },
+    gridSubText: { color: Colors.textSecondary, fontSize: 11, marginTop: 4, fontFamily: 'PlusJakartaSans_400Regular' },
+    emptyText: { color: Colors.textSecondary, textAlign: 'center', marginTop: 40, fontFamily: 'PlusJakartaSans_400Regular' },
 
     // ── History ──
     historyContainer: { flex: 1, paddingHorizontal: 5 },
@@ -400,6 +400,7 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
         fontSize: 13,
         fontWeight: '600',
+        fontFamily: 'PlusJakartaSans_700Bold',
         textTransform: 'uppercase',
         letterSpacing: 1,
     },
@@ -407,6 +408,7 @@ const styles = StyleSheet.create({
         color: Colors.primary,
         fontSize: 13,
         fontWeight: '600',
+        fontFamily: 'PlusJakartaSans_700Bold',
     },
     historyQueryRow: {
         flexDirection: 'row',
@@ -416,7 +418,7 @@ const styles = StyleSheet.create({
         marginBottom: 10,
     },
     historyIcon: { fontSize: 14 },
-    historyQueryText: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1 },
+    historyQueryText: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1, fontFamily: 'PlusJakartaSans_700Bold' },
     historyArrow: { color: Colors.textSecondary, fontSize: 16 },
     historyCardsRow: {
         flexDirection: 'row',
@@ -439,6 +441,7 @@ const styles = StyleSheet.create({
         color: Colors.textPrimary,
         fontSize: 11,
         fontWeight: '600',
+        fontFamily: 'PlusJakartaSans_700Bold',
         padding: 8,
         lineHeight: 14,
     },

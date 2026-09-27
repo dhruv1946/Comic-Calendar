@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../../hooks/useTheme';
 import { Colors as StaticColors } from '../../constants/styles';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { auth } from '../../firebase';
 
 const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
 
@@ -45,7 +46,7 @@ function CustomTabBar({ state, descriptors, navigation, colors }: BottomTabBarPr
                                     entering={FadeIn.duration(200)}
                                     exiting={FadeOut.duration(200)}
                                     numberOfLines={1}
-                                    style={{ color: colors.onSecondaryContainer || '#ffffff', fontWeight: 'bold', fontSize: 14, marginLeft: 6 }}
+                                    style={{ color: colors.onSecondaryContainer || '#ffffff', fontFamily: 'SpaceGrotesk_700Bold', fontWeight: 'normal', fontSize: 14, marginLeft: 6 }}
                                 >
                                     {label}
                                 </Animated.Text>
@@ -69,6 +70,7 @@ export default function TabLayout() {
                 headerShown: true,
                 headerStyle: { backgroundColor: colors.surface },
                 headerTintColor: colors.onSurface || StaticColors.textPrimary,
+                headerTitleStyle: { fontFamily: 'Syne_700Bold', fontWeight: 'normal' },
                 sceneStyle: { flex: 1, backgroundColor: colors.surface },
                 animation: 'shift',
                 lazy: false,
@@ -82,7 +84,11 @@ export default function TabLayout() {
                     headerRight: () => (
                         <Link href="/profile" asChild>
                             <TouchableOpacity style={{ marginRight: 15 }}>
-                                <Text style={{ color: colors.primary, fontWeight: 'bold' }}>Profile</Text>
+                                <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.outline }}>
+                                    <Text style={{ color: colors.onPrimary, fontWeight: 'bold', fontSize: 16 }}>
+                                        {auth.currentUser?.displayName ? auth.currentUser.displayName.charAt(0).toUpperCase() : '?'}
+                                    </Text>
+                                </View>
                             </TouchableOpacity>
                         </Link>
                     ),
@@ -91,7 +97,7 @@ export default function TabLayout() {
             <Tabs.Screen
                 name="search"
                 options={{
-                    title: 'Search Database',
+                    title: 'Search',
                 }}
             />
         </Tabs>

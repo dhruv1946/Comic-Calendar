@@ -96,8 +96,8 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-    const [preference, setPreferenceState] = useState<ThemePreference>('system');
-    const [colorMode, setColorModeState] = useState<ColorMode>('system');
+    const [preference, setPreferenceState] = useState<ThemePreference>('noir');
+    const [colorMode, setColorModeState] = useState<ColorMode>('dark');
     const systemColorScheme = useColorScheme();
     
     // We use dynamic theme. If the user picks a preset, we feed that preset's color 

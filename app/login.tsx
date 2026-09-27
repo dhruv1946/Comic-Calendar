@@ -1,17 +1,19 @@
 import { useRouter } from 'expo-router';
 import { sendPasswordResetEmail, signInWithEmailAndPassword } from 'firebase/auth';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useThemedAlert } from '../components/ThemedAlertProvider';
 import { getFirebaseErrorMessage } from '../constants/firebaseErrors';
-import { Colors, SharedStyles } from '../constants/styles';
+import { SharedStyles } from '../constants/styles';
 import { validateEmail, validatePassword } from '../constants/validation';
 import { auth } from '../firebase';
 import { useAppTheme } from '../hooks/useTheme';
-import { useThemedAlert } from '../components/ThemedAlertProvider';
 
 export default function Login() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const { colors } = useAppTheme();
     const { showAlert } = useThemedAlert();
@@ -68,7 +70,7 @@ export default function Login() {
         <View style={[SharedStyles.authContainer, { backgroundColor: colors.background }]}>
             {!isResetting ? (
                 <>
-                    <Text style={[SharedStyles.headerText, { color: colors.onBackground }]}>Welcome to your Pull List</Text>
+                    <Text style={[SharedStyles.headerText, { color: colors.onBackground, fontFamily: 'Syne_700Bold', fontWeight: 'normal' }]} numberOfLines={1} adjustsFontSizeToFit>Welcome to Comic Calender</Text>
 
                     <View style={SharedStyles.inputContainer}>
                         <TextInput
@@ -80,15 +82,23 @@ export default function Login() {
                             autoCapitalize="none"
                             keyboardType="email-address"
                         />
-                        <TextInput
-                            style={[SharedStyles.input, { backgroundColor: colors.surfaceContainer, color: colors.onSurface, borderColor: colors.outline }]}
-                            onChangeText={setPassword}
-                            value={password}
-                            secureTextEntry={true}
-                            placeholder="Password"
-                            placeholderTextColor={colors.onSurfaceVariant}
-                            autoCapitalize="none"
-                        />
+                        <View style={{ justifyContent: 'center' }}>
+                            <TextInput
+                                style={[SharedStyles.input, { backgroundColor: colors.surfaceContainer, color: colors.onSurface, borderColor: colors.outline, paddingRight: 50 }]}
+                                onChangeText={setPassword}
+                                value={password}
+                                secureTextEntry={!showPassword}
+                                placeholder="Password"
+                                placeholderTextColor={colors.onSurfaceVariant}
+                                autoCapitalize="none"
+                            />
+                            <TouchableOpacity
+                                style={{ position: 'absolute', right: 15 }}
+                                onPress={() => setShowPassword(!showPassword)}
+                            >
+                                <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={24} color={colors.onSurfaceVariant} />
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
                     <View style={SharedStyles.buttonContainer}>
@@ -140,5 +150,5 @@ export default function Login() {
 }
 
 const styles = StyleSheet.create({
-    forgotPasswordText: { textAlign: 'center', fontSize: 14, textDecorationLine: 'underline' },
+    forgotPasswordText: { textAlign: 'center', fontSize: 14, textDecorationLine: 'underline', fontFamily: 'PlusJakartaSans_400Regular' },
 });

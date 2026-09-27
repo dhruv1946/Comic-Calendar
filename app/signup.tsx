@@ -110,5 +110,5 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         alignItems: 'center',
     },
-    backButtonText: { fontWeight: 'bold', fontSize: 14 },
+    backButtonText: { fontWeight: 'normal', fontSize: 14, fontFamily: 'SpaceGrotesk_700Bold' },
 });

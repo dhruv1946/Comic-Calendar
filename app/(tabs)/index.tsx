@@ -291,7 +291,7 @@ export default function Home() {
                         recyclingKey={item.id}
                     />
                 ) : (
-                    <Text style={{ color: Colors.textMuted }}>No Cover</Text>
+                    <Text style={{ color: Colors.textMuted, fontFamily: 'PlusJakartaSans_400Regular' }}>No Cover</Text>
                 )}
                 <TouchableOpacity
                     style={[SharedStyles.deleteButton, { backgroundColor: colors.primary }]}
@@ -367,13 +367,14 @@ export default function Home() {
 
 const styles = StyleSheet.create({
     emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    emptyText: { color: Colors.textPrimary, fontSize: 18, fontWeight: 'bold' },
-    subText: { color: Colors.textSecondary, fontSize: 14, marginTop: 8 },
+    emptyText: { color: Colors.textPrimary, fontSize: 18, fontWeight: 'bold', fontFamily: 'PlusJakartaSans_700Bold' },
+    subText: { color: Colors.textSecondary, fontSize: 14, marginTop: 8, fontFamily: 'PlusJakartaSans_400Regular' },
     nextIssueDate: {
         color: Colors.primary,
         fontSize: 11,
         marginTop: 3,
         fontWeight: '600',
+        fontFamily: 'PlusJakartaSans_500Medium',
     },
     latestIssueDate: {
         color: Colors.warning,
@@ -388,7 +389,7 @@ const styles = StyleSheet.create({
         borderRadius: 30,
         elevation: 5,
     },
-    fabText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+    fabText: { color: 'white', fontWeight: 'bold', fontSize: 16, fontFamily: 'PlusJakartaSans_700Bold' },
     verificationBanner: {
         backgroundColor: '#2a2a1a',
         borderBottomWidth: 1,
@@ -405,8 +406,8 @@ const styles = StyleSheet.create({
         gap: 12,
         flex: 1,
     },
-    bannerText: { color: '#e8d44d', fontSize: 13, fontWeight: '500' },
-    resendText: { color: Colors.primary, fontSize: 13, fontWeight: 'bold', textDecorationLine: 'underline' },
+    bannerText: { color: '#e8d44d', fontSize: 13, fontWeight: '500', fontFamily: 'PlusJakartaSans_500Medium' },
+    resendText: { color: Colors.primary, fontSize: 13, fontWeight: 'bold', textDecorationLine: 'underline', fontFamily: 'PlusJakartaSans_700Bold' },
     bannerClose: { padding: 4, marginLeft: 8 },
-    bannerCloseText: { color: Colors.textSecondary, fontSize: 16 },
+    bannerCloseText: { color: Colors.textSecondary, fontSize: 16, fontFamily: 'PlusJakartaSans_400Regular' },
 });
