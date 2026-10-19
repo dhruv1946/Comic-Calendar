@@ -15,111 +15,25 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
+import { Config } from './config';
 
 const DEFAULT_TIMEOUT_MS = 10000;
-const BATCH_DELAY_MS = 1500; // 1.5s between requests — be gentle
+const BATCH_DELAY_MS = 1500; // 1.5s between requests - be gentle
+const METRON_API_BASE = 'https://metron.cloud/api';
 
-// ── Proxy URL resolution ──
-// All platforms route through the dev proxy (scripts/cors-proxy.js).
-// The proxy injects Metron credentials server-side — the client sends zero secrets.
-const PROXY_PORT = 3001;
-const DEV_LAN_IP = '192.168.1.100'; // Development machine Wi-Fi IP
-const PROXY_STORAGE_KEY = '@comic_cal_proxy_base_url';
-
-let activeBaseUrl: string | null = null;
-let resolvePromise: Promise<string> | null = null;
-
-export async function getProxyBaseUrl(): Promise<string> {
-    if (activeBaseUrl) return activeBaseUrl;
-    if (resolvePromise) return resolvePromise;
-
-    resolvePromise = (async () => {
-        if (Platform.OS === 'web') {
-            activeBaseUrl = `http://localhost:${PROXY_PORT}/api`;
-            return activeBaseUrl;
+function encodeBase64(str: string): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    let output = '';
+    for (let block = 0, charCode, i = 0, map = chars;
+        str.charAt(i | 0) || (map = '=', i % 1);
+        output += map.charAt(63 & block >> 8 - i % 1 * 8)) {
+        charCode = str.charCodeAt(i += 3 / 4);
+        if (charCode > 0xFF) {
+            throw new Error("'btoa' failed: The string to be encoded contains characters outside of the Latin1 range.");
         }
-
-        // Check if previously discovered working URL is in AsyncStorage
-        try {
-            const cached = await AsyncStorage.getItem(PROXY_STORAGE_KEY);
-            if (cached) {
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 600);
-                try {
-                    const res = await fetch(`${cached}/health`, { signal: controller.signal });
-                    clearTimeout(timer);
-                    if (res.ok) {
-                        activeBaseUrl = cached;
-                        return cached;
-                    }
-                } catch {
-                    clearTimeout(timer);
-                }
-                activeBaseUrl = cached;
-            }
-        } catch { /* ignore */ }
-
-        // Gather all possible routes to the local dev proxy
-        const candidates: string[] = [];
-
-        // 1. Host from Expo dev server if available
-        const rawHostUri = Constants.expoConfig?.hostUri ||
-            (Constants as any).manifest2?.extra?.expoGo?.debuggerHost ||
-            (Constants as any).manifest?.debuggerHost;
-        if (rawHostUri && typeof rawHostUri === 'string') {
-            const host = rawHostUri.split(':')[0];
-            if (host) candidates.push(`http://${host}:${PROXY_PORT}/api`);
-        }
-
-        // 2. Localhost & 127.0.0.1 (works over USB debugging with adb reverse)
-        candidates.push(`http://127.0.0.1:${PROXY_PORT}/api`);
-        candidates.push(`http://localhost:${PROXY_PORT}/api`);
-
-        // 3. Dev machine LAN IP (works over Wi-Fi on physical device)
-        candidates.push(`http://${DEV_LAN_IP}:${PROXY_PORT}/api`);
-
-        // 4. Android Emulator loopback alias
-        candidates.push(`http://10.0.2.2:${PROXY_PORT}/api`);
-
-        if (activeBaseUrl && !candidates.includes(activeBaseUrl)) {
-            candidates.unshift(activeBaseUrl);
-        }
-
-        const uniqueCandidates = Array.from(new Set(candidates));
-
-        // Probe each candidate concurrently to find the first working connection
-        const probe = async (url: string): Promise<string> => {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 1800);
-            try {
-                const res = await fetch(`${url}/health`, { signal: controller.signal });
-                clearTimeout(timer);
-                if (res.ok) return url;
-            } catch {
-                // Not reachable on this address
-            } finally {
-                clearTimeout(timer);
-            }
-            throw new Error(`Unreachable: ${url}`);
-        };
-
-        try {
-            const workingUrl = await Promise.any(uniqueCandidates.map(probe));
-            activeBaseUrl = workingUrl;
-            AsyncStorage.setItem(PROXY_STORAGE_KEY, workingUrl).catch(() => {});
-            return workingUrl;
-        } catch {
-            const fallback = activeBaseUrl || uniqueCandidates[0] || `http://${DEV_LAN_IP}:${PROXY_PORT}/api`;
-            activeBaseUrl = fallback;
-            return fallback;
-        }
-    })();
-
-    const result = await resolvePromise;
-    resolvePromise = null;
-    return result;
+        block = block << 8 | charCode;
+    }
+    return output;
 }
 
 // ── Cache TTLs ──
@@ -193,9 +107,17 @@ export async function metronFetch(path: string, timeoutMs = DEFAULT_TIMEOUT_MS):
     const id = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-        const baseUrl = await getProxyBaseUrl();
-        const response = await fetch(`${baseUrl}${path}`, {
-            headers: { 'Content-Type': 'application/json' },
+        const user = Config.METRON_USER || '';
+        const pass = Config.METRON_PASS || '';
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+        };
+        if (user && pass) {
+            headers['Authorization'] = 'Basic ' + encodeBase64(`${user}:${pass}`);
+        }
+
+        const response = await fetch(`${METRON_API_BASE}${path}`, {
+            headers,
             signal: controller.signal,
         });
         clearTimeout(id);
