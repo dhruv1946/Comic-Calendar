@@ -1,16 +1,19 @@
-import { Ionicons } from '@expo/vector-icons';
-import { Link, Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { Colors } from '../constants/styles';
 import { auth } from '../firebase';
 import { requestNotificationPermissions } from '../constants/notifications';
 import { ThemeProvider, useAppTheme } from '../hooks/useTheme';
 import { ThemedAlertProvider } from '../components/ThemedAlertProvider';
-import { useFonts, Syne_400Regular, Syne_700Bold } from '@expo-google-fonts/syne';
-import { SpaceGrotesk_400Regular, SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk';
+import { useFonts, Syne_700Bold } from '@expo-google-fonts/syne';
+import { SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk';
 import { PlusJakartaSans_400Regular, PlusJakartaSans_500Medium, PlusJakartaSans_700Bold } from '@expo-google-fonts/plus-jakarta-sans';
+import * as SplashScreen from 'expo-splash-screen';
+
+// Prevent the native splash screen from hiding before initial assets and auth are ready
+SplashScreen.preventAutoHideAsync();
 
 // ── Error Boundary ───────────────────────────────────────────────────
 // Expo Router uses this export to wrap screens automatically
@@ -35,11 +38,12 @@ export function ErrorBoundary({ error, retry }: { error: Error; retry: () => voi
 }
 
 // ── Root Layout ──────────────────────────────────────────────────────
-function RootLayoutNav() {
+function RootLayoutNav({ initialRoute }: { initialRoute: string }) {
     const { colors } = useAppTheme();
     return (
         <ThemedAlertProvider>
             <Stack
+                initialRouteName={initialRoute}
                 screenOptions={{
                     headerStyle: { backgroundColor: colors.surface },
                     headerTintColor: colors.onSurface,
@@ -61,10 +65,9 @@ export default function Layout() {
     const [isReady, setIsReady] = useState(false);
     const [user, setUser] = useState<User | null>(null);
 
+    // Optimized font loading: only load the font weights actually used
     const [fontsLoaded] = useFonts({
-        Syne_400Regular,
         Syne_700Bold,
-        SpaceGrotesk_400Regular,
         SpaceGrotesk_700Bold,
         PlusJakartaSans_400Regular,
         PlusJakartaSans_500Medium,
@@ -72,8 +75,6 @@ export default function Layout() {
     });
 
     useEffect(() => {
-        requestNotificationPermissions();
-
         const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
             setUser(firebaseUser);
             setIsReady(true);
@@ -82,6 +83,17 @@ export default function Layout() {
         return () => unsubscribe();
     }, []);
 
+    // Defer notification permissions until after app is interactive to avoid startup delay
+    useEffect(() => {
+        if (isReady && fontsLoaded) {
+            const timer = setTimeout(() => {
+                requestNotificationPermissions();
+            }, 2500);
+            return () => clearTimeout(timer);
+        }
+    }, [isReady, fontsLoaded]);
+
+    // Handle subsequent auth state changes (login / logout)
     useEffect(() => {
         if (!isReady) return;
 
@@ -94,17 +106,29 @@ export default function Layout() {
         }
     }, [isReady, user]);
 
+    // Dismiss the native splash screen only after the initial screen has mounted and painted
+    const onLayoutRootView = useCallback(() => {
+        if (isReady && fontsLoaded) {
+            requestAnimationFrame(async () => {
+                try {
+                    await SplashScreen.hideAsync();
+                } catch {
+                    // Ignore any native dismiss race conditions
+                }
+            });
+        }
+    }, [isReady, fontsLoaded]);
+
+    // Keep native splash screen visible while loading (no second screen / no flashing)
     if (!isReady || !fontsLoaded) {
-        return (
-            <View style={{ flex: 1, backgroundColor: Colors.background, justifyContent: 'center', alignItems: 'center' }}>
-                <ActivityIndicator size="large" color={Colors.primary} />
-            </View>
-        );
+        return null;
     }
 
     return (
-        <ThemeProvider>
-            <RootLayoutNav />
-        </ThemeProvider>
+        <View style={{ flex: 1, backgroundColor: '#000000' }} onLayout={onLayoutRootView}>
+            <ThemeProvider>
+                <RootLayoutNav initialRoute={user ? '(tabs)' : 'login'} />
+            </ThemeProvider>
+        </View>
     );
 }

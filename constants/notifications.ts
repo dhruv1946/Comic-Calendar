@@ -89,25 +89,3 @@ export async function scheduleReleaseNotifications(
     }
   }
 }
-
-export async function sendTestNotification() {
-  if (Platform.OS === 'web') {
-    alert("Test Notification: (Push notifications are not supported in this environment)");
-    return;
-  }
-
-  const hasPermission = await requestNotificationPermissions();
-  if (!hasPermission) return;
-
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: "𝗧𝗼𝗱𝗮𝘆'𝘀 𝗰𝗼𝗺𝗶𝗰 𝗳𝗼𝗿𝗲𝗰𝗮𝘀𝘁!!",
-      body: 'Batman #15 drops today',
-      sound: true,
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-      seconds: 2,
-    },
-  });
-}

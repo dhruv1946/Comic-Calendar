@@ -73,7 +73,7 @@ export default function TabLayout() {
                 headerTitleStyle: { fontFamily: 'Syne_700Bold', fontWeight: 'normal' },
                 sceneStyle: { flex: 1, backgroundColor: colors.surface },
                 animation: 'shift',
-                lazy: false,
+                lazy: true,
                 freezeOnBlur: false,
             }}
         >

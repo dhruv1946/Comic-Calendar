@@ -68,6 +68,17 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // Health check endpoint for client proxy discovery
+    if (req.url === '/health' || req.url === '/api/health') {
+        const corsOrigin = isAllowedOrigin ? origin : (isNativeRequest ? '*' : 'null');
+        res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': corsOrigin,
+        });
+        res.end(JSON.stringify({ status: 'ok', server: 'comic-calendar-proxy' }));
+        return;
+    }
+
     // Only allow /api/ paths
     if (!req.url || !req.url.startsWith('/api/')) {
         res.writeHead(403, { 'Content-Type': 'text/plain' });
@@ -89,13 +100,12 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // Forward request to Metron — inject credentials server-side
-    const forwardHeaders = { ...req.headers };
-    delete forwardHeaders['host'];
-    delete forwardHeaders['origin'];
-    delete forwardHeaders['referer'];
-    // Strip any client-sent auth header (credentials live here, not on client)
-    delete forwardHeaders['authorization'];
+    // Forward request to Metron — inject credentials server-side.
+    // Use an allowlist for client headers to avoid leaking internal client metadata.
+    const forwardHeaders = {};
+    if (req.headers['accept']) forwardHeaders['accept'] = req.headers['accept'];
+    if (req.headers['accept-encoding']) forwardHeaders['accept-encoding'] = req.headers['accept-encoding'];
+    if (req.headers['user-agent']) forwardHeaders['user-agent'] = req.headers['user-agent'];
 
     const options = {
         hostname: TARGET,

@@ -25,33 +25,123 @@ const BATCH_DELAY_MS = 1500; // 1.5s between requests — be gentle
 // All platforms route through the dev proxy (scripts/cors-proxy.js).
 // The proxy injects Metron credentials server-side — the client sends zero secrets.
 const PROXY_PORT = 3001;
+const DEV_LAN_IP = '192.168.1.100'; // Development machine Wi-Fi IP
+const PROXY_STORAGE_KEY = '@comic_cal_proxy_base_url';
 
-function getProxyBaseUrl(): string {
-    if (Platform.OS === 'web') {
-        return `http://localhost:${PROXY_PORT}/api`;
-    }
-    // On native, derive the host from Expo's dev server URI
-    // (e.g., '192.168.1.100:8081' → '192.168.1.100')
-    const hostUri = Constants.expoConfig?.hostUri;
-    if (hostUri) {
-        const host = hostUri.split(':')[0];
-        return `http://${host}:${PROXY_PORT}/api`;
-    }
-    // Fallback — Android emulator's alias for host loopback
-    return `http://10.0.2.2:${PROXY_PORT}/api`;
+let activeBaseUrl: string | null = null;
+let resolvePromise: Promise<string> | null = null;
+
+export async function getProxyBaseUrl(): Promise<string> {
+    if (activeBaseUrl) return activeBaseUrl;
+    if (resolvePromise) return resolvePromise;
+
+    resolvePromise = (async () => {
+        if (Platform.OS === 'web') {
+            activeBaseUrl = `http://localhost:${PROXY_PORT}/api`;
+            return activeBaseUrl;
+        }
+
+        // Check if previously discovered working URL is in AsyncStorage
+        try {
+            const cached = await AsyncStorage.getItem(PROXY_STORAGE_KEY);
+            if (cached) {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 600);
+                try {
+                    const res = await fetch(`${cached}/health`, { signal: controller.signal });
+                    clearTimeout(timer);
+                    if (res.ok) {
+                        activeBaseUrl = cached;
+                        return cached;
+                    }
+                } catch {
+                    clearTimeout(timer);
+                }
+                activeBaseUrl = cached;
+            }
+        } catch { /* ignore */ }
+
+        // Gather all possible routes to the local dev proxy
+        const candidates: string[] = [];
+
+        // 1. Host from Expo dev server if available
+        const rawHostUri = Constants.expoConfig?.hostUri ||
+            (Constants as any).manifest2?.extra?.expoGo?.debuggerHost ||
+            (Constants as any).manifest?.debuggerHost;
+        if (rawHostUri && typeof rawHostUri === 'string') {
+            const host = rawHostUri.split(':')[0];
+            if (host) candidates.push(`http://${host}:${PROXY_PORT}/api`);
+        }
+
+        // 2. Localhost & 127.0.0.1 (works over USB debugging with adb reverse)
+        candidates.push(`http://127.0.0.1:${PROXY_PORT}/api`);
+        candidates.push(`http://localhost:${PROXY_PORT}/api`);
+
+        // 3. Dev machine LAN IP (works over Wi-Fi on physical device)
+        candidates.push(`http://${DEV_LAN_IP}:${PROXY_PORT}/api`);
+
+        // 4. Android Emulator loopback alias
+        candidates.push(`http://10.0.2.2:${PROXY_PORT}/api`);
+
+        if (activeBaseUrl && !candidates.includes(activeBaseUrl)) {
+            candidates.unshift(activeBaseUrl);
+        }
+
+        const uniqueCandidates = Array.from(new Set(candidates));
+
+        // Probe each candidate concurrently to find the first working connection
+        const probe = async (url: string): Promise<string> => {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 1800);
+            try {
+                const res = await fetch(`${url}/health`, { signal: controller.signal });
+                clearTimeout(timer);
+                if (res.ok) return url;
+            } catch {
+                // Not reachable on this address
+            } finally {
+                clearTimeout(timer);
+            }
+            throw new Error(`Unreachable: ${url}`);
+        };
+
+        try {
+            const workingUrl = await Promise.any(uniqueCandidates.map(probe));
+            activeBaseUrl = workingUrl;
+            AsyncStorage.setItem(PROXY_STORAGE_KEY, workingUrl).catch(() => {});
+            return workingUrl;
+        } catch {
+            const fallback = activeBaseUrl || uniqueCandidates[0] || `http://${DEV_LAN_IP}:${PROXY_PORT}/api`;
+            activeBaseUrl = fallback;
+            return fallback;
+        }
+    })();
+
+    const result = await resolvePromise;
+    resolvePromise = null;
+    return result;
 }
-
-const BASE_URL = getProxyBaseUrl();
 
 // ── Cache TTLs ──
 const COVER_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;  // 7 days (covers rarely change)
 const DATE_CACHE_TTL = 6 * 60 * 60 * 1000;         // 6 hours (dates update weekly)
 const SEARCH_CACHE_TTL = 30 * 60 * 1000;            // 30 min (search results)
 
-// ── In-memory caches ──
+// ── In-memory caches (bounded to prevent unbounded growth) ──
+const MAX_MEM_CACHE_ENTRIES = 200;
 const memCoverCache = new Map<number, { url: string | null; ts: number }>();
 const memDateCache = new Map<number, { data: any; ts: number }>();
 const memSearchCache = new Map<string, { results: any[]; ts: number }>();
+
+function setBoundedCache<K, V>(map: Map<K, V>, key: K, value: V, maxEntries = MAX_MEM_CACHE_ENTRIES): void {
+    if (map.size >= maxEntries && !map.has(key)) {
+        const oldestKey = map.keys().next().value;
+        if (oldestKey !== undefined) {
+            map.delete(oldestKey);
+        }
+    }
+    map.set(key, value);
+}
 
 // ── Rate limit tracking ──
 let rateLimitRemaining = 100; // Assume healthy until we learn otherwise
@@ -103,7 +193,8 @@ export async function metronFetch(path: string, timeoutMs = DEFAULT_TIMEOUT_MS):
     const id = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-        const response = await fetch(`${BASE_URL}${path}`, {
+        const baseUrl = await getProxyBaseUrl();
+        const response = await fetch(`${baseUrl}${path}`, {
             headers: { 'Content-Type': 'application/json' },
             signal: controller.signal,
         });
@@ -190,7 +281,7 @@ async function fetchSeriesByType(name: string, seriesTypeId: number): Promise<an
     // Disk cache
     const diskEntry = await getCached<any[]>(`metron_search_${cacheKey}`);
     if (diskEntry && Date.now() - diskEntry.ts < SEARCH_CACHE_TTL) {
-        memSearchCache.set(cacheKey, { results: diskEntry.data, ts: diskEntry.ts });
+        setBoundedCache(memSearchCache, cacheKey, { results: diskEntry.data, ts: diskEntry.ts });
         return diskEntry.data;
     }
 
@@ -201,7 +292,7 @@ async function fetchSeriesByType(name: string, seriesTypeId: number): Promise<an
     const results: any[] = data.results || [];
 
     // Cache
-    memSearchCache.set(cacheKey, { results, ts: Date.now() });
+    setBoundedCache(memSearchCache, cacheKey, { results, ts: Date.now() });
     await setCache(`metron_search_${cacheKey}`, results);
 
     return results;
@@ -222,7 +313,7 @@ export async function fetchIssueCover(seriesMetronId: number): Promise<string | 
     const diskKey = `metron_cover_${seriesMetronId}`;
     const diskEntry = await getCached<string | null>(diskKey);
     if (diskEntry && Date.now() - diskEntry.ts < COVER_CACHE_TTL) {
-        memCoverCache.set(seriesMetronId, { url: diskEntry.data, ts: diskEntry.ts });
+        setBoundedCache(memCoverCache, seriesMetronId, { url: diskEntry.data, ts: diskEntry.ts });
         return diskEntry.data;
     }
 
@@ -231,7 +322,7 @@ export async function fetchIssueCover(seriesMetronId: number): Promise<string | 
         const resp = await metronFetch(`/issue/?series_id=${seriesMetronId}&number=1`);
         const json = await resp.json();
         const url = json.results?.[0]?.image || null;
-        memCoverCache.set(seriesMetronId, { url, ts: Date.now() });
+        setBoundedCache(memCoverCache, seriesMetronId, { url, ts: Date.now() });
         await setCache(diskKey, url);
         return url;
     } catch {
@@ -262,15 +353,15 @@ export async function fetchIssueDate(
 ): Promise<{ date: string; label: 'next' | 'latest'; issueNumber?: string } | null> {
     // Memory cache
     const memEntry = memDateCache.get(seriesMetronId);
-    if (memEntry && isDateCacheFresh(memEntry)) {
+    if (memEntry && isDateCacheFresh(memEntry) && (memEntry.data === null || 'issueNumber' in (memEntry.data || {}))) {
         return memEntry.data;
     }
 
     // Disk cache
     const diskKey = `metron_date_${seriesMetronId}`;
     const diskEntry = await getCached<{ date: string; label: 'next' | 'latest'; issueNumber?: string } | null>(diskKey);
-    if (diskEntry && isDateCacheFresh(diskEntry)) {
-        memDateCache.set(seriesMetronId, { data: diskEntry.data, ts: diskEntry.ts });
+    if (diskEntry && isDateCacheFresh(diskEntry) && (diskEntry.data === null || 'issueNumber' in (diskEntry.data || {}))) {
+        setBoundedCache(memDateCache, seriesMetronId, { data: diskEntry.data, ts: diskEntry.ts });
         return diskEntry.data;
     }
 
@@ -304,7 +395,7 @@ export async function fetchIssueDate(
         }
 
         // Cache the result (even null, to avoid re-fetching)
-        memDateCache.set(seriesMetronId, { data: result, ts: Date.now() });
+        setBoundedCache(memDateCache, seriesMetronId, { data: result, ts: Date.now() });
         await setCache(diskKey, result);
         return result;
     } catch (_e) {

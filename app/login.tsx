@@ -70,7 +70,7 @@ export default function Login() {
         <View style={[SharedStyles.authContainer, { backgroundColor: colors.background }]}>
             {!isResetting ? (
                 <>
-                    <Text style={[SharedStyles.headerText, { color: colors.onBackground, fontFamily: 'Syne_700Bold', fontWeight: 'normal' }]} numberOfLines={1} adjustsFontSizeToFit>Welcome to Comic Calender</Text>
+                    <Text style={[SharedStyles.headerText, { color: colors.onBackground, fontFamily: 'Syne_700Bold', fontWeight: 'normal' }]} numberOfLines={1} adjustsFontSizeToFit>Welcome to Comic Calendar</Text>
 
                     <View style={SharedStyles.inputContainer}>
                         <TextInput

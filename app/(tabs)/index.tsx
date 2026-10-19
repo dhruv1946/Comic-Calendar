@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
-import { Link, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { sendEmailVerification } from 'firebase/auth';
 import { collection, deleteDoc, doc, getDocs, orderBy, query, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -12,6 +12,7 @@ import { useAppTheme } from '../../hooks/useTheme';
 import { useThemedAlert } from '../../components/ThemedAlertProvider';
 import { auth, db } from '../../firebase';
 
+const PULL_LIST_CACHE_KEY = 'comic_calendar_pull_list_v1';
 const ISSUE_DATES_CACHE_KEY = 'comic_calendar_issue_dates_v2';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
@@ -33,11 +34,36 @@ export default function Home() {
     const [nextIssueDates, setNextIssueDates] = useState<Record<string, { date: string; label: 'next' | 'latest'; issueNumber?: string }>>({});
     const nextIssueDatesRef = useRef(nextIssueDates);
     nextIssueDatesRef.current = nextIssueDates;
-    const [emailVerified, setEmailVerified] = useState(true);
+    const [emailVerified, setEmailVerified] = useState(() => auth.currentUser?.emailVerified ?? true);
     const [bannerDismissed, setBannerDismissed] = useState(false);
 
     const hasInitiallyLoaded = useRef(false);
     const needsRefreshOnFocus = useRef(false);
+
+    // Fast boot: load cached pull list & issue dates immediately from disk (instant initial paint)
+    useEffect(() => {
+        (async () => {
+            try {
+                const [cachedSeriesRaw, cachedDatesRaw] = await Promise.all([
+                    AsyncStorage.getItem(PULL_LIST_CACHE_KEY),
+                    AsyncStorage.getItem(ISSUE_DATES_CACHE_KEY),
+                ]);
+                if (cachedSeriesRaw) {
+                    const parsed = JSON.parse(cachedSeriesRaw);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        setSeries(parsed);
+                        setLoading(false);
+                    }
+                }
+                if (cachedDatesRaw) {
+                    const parsed = JSON.parse(cachedDatesRaw);
+                    if (parsed?.data) {
+                        setNextIssueDates(parsed.data);
+                    }
+                }
+            } catch { /* ignore cache read error */ }
+        })();
+    }, []);
 
     useFocusEffect(
         useCallback(() => {
@@ -62,7 +88,7 @@ export default function Home() {
 
     const checkEmailVerification = async () => {
         const user = auth.currentUser;
-        if (user) {
+        if (user && !user.emailVerified) {
             await user.reload();
             setEmailVerified(user.emailVerified);
         }
@@ -112,27 +138,19 @@ export default function Home() {
 
             setSeries(data);
             setLoading(false);
+            AsyncStorage.setItem(PULL_LIST_CACHE_KEY, JSON.stringify(data)).catch(() => {});
 
-            // Load cached issue dates instantly (no network)
-            const cacheIsFresh = await loadCachedIssueDates();
+            // Check cached issue dates and schedule notifications / refresh
+            const { isFresh, dates: cachedDates } = await loadCachedIssueDates();
 
-            // Enrich with Metron data in background — don't block the UI.
-            // Run sequentially: covers first (usually 0 calls), then dates.
-            // This avoids concurrent requests to Metron from two parallel batches.
-            repairMissingCovers(data).catch(() => { }).then(() => {
-                if (cacheIsFresh) {
-                    // Try to schedule using the state since loadCachedIssueDates just updated it
-                    // Due to state being async, we'll wait a tiny bit or just fetch the cache again
-                    AsyncStorage.getItem(ISSUE_DATES_CACHE_KEY).then(cached => {
-                        if (cached) {
-                            const { data: cachedDates } = JSON.parse(cached);
-                            triggerSchedules(data, cachedDates);
-                        }
-                    });
-                } else {
-                    refreshDates(data).catch(() => { });
-                }
-            });
+            // Run cover repair and date refresh in background without blocking each other
+            repairMissingCovers(data).catch(() => {});
+
+            if (isFresh && cachedDates) {
+                triggerSchedules(data, cachedDates);
+            } else {
+                refreshDates(data).catch(() => {});
+            }
         } catch (error) {
             console.error('Error fetching series:', error);
         } finally {
@@ -140,8 +158,8 @@ export default function Home() {
         }
     };
 
-    /** Load cached issue dates from AsyncStorage. Returns true if cache is fresh. */
-    const loadCachedIssueDates = async (): Promise<boolean> => {
+    /** Load cached issue dates from AsyncStorage. Returns freshness and cached dates. */
+    const loadCachedIssueDates = async (): Promise<{ isFresh: boolean; dates: Record<string, { date: string; label: 'next' | 'latest'; issueNumber?: string }> | null }> => {
         try {
             const cached = await AsyncStorage.getItem(ISSUE_DATES_CACHE_KEY);
             if (cached) {
@@ -149,21 +167,27 @@ export default function Home() {
                 setNextIssueDates(data);
 
                 // Cache is stale if older than 6 hours
-                if (Date.now() - timestamp >= CACHE_TTL_MS) return false;
+                if (Date.now() - timestamp >= CACHE_TTL_MS) return { isFresh: false, dates: data };
 
                 // Cache is also stale if ANY 'next' date has already passed
                 const today = new Date().toISOString().split('T')[0];
                 const hasPassedDate = Object.values(data).some(
                     (entry: any) => entry?.label === 'next' && entry?.date && entry.date <= today,
                 );
-                if (hasPassedDate) return false;
+                if (hasPassedDate) return { isFresh: false, dates: data };
 
-                return true;
+                // Cache is stale if any entry lacks the 'issueNumber' property (upgrade path)
+                const hasMissingIssueNumber = Object.values(data).some(
+                    (entry: any) => entry && !('issueNumber' in entry)
+                );
+                if (hasMissingIssueNumber) return { isFresh: false, dates: data };
+
+                return { isFresh: true, dates: data };
             }
         } catch {
             // Cache miss is fine
         }
-        return false;
+        return { isFresh: false, dates: null };
     };
 
     const repairMissingCovers = async (seriesList: Series[]) => {
@@ -207,17 +231,8 @@ export default function Home() {
         }
 
         try {
-            // Seed accumulator with existing dates so we can batch write once at the end
-            let dateAcc: Record<string, { date: string; label: 'next' | 'latest'; issueNumber?: string }> = { ...nextIssueDates };
-            try {
-                const raw = await AsyncStorage.getItem(ISSUE_DATES_CACHE_KEY);
-                if (raw) {
-                    const parsed = JSON.parse(raw);
-                    if (parsed?.data) {
-                        dateAcc = { ...parsed.data, ...dateAcc };
-                    }
-                }
-            } catch { /* ignore */ }
+            // Seed accumulator with existing dates from memory
+            let dateAcc: Record<string, { date: string; label: 'next' | 'latest'; issueNumber?: string }> = { ...nextIssueDatesRef.current };
 
             await batchParallel(
                 withMetronId,
@@ -265,7 +280,11 @@ export default function Home() {
                     onPress: async () => {
                         try {
                             await deleteDoc(doc(db, 'series', id));
-                            setSeries((prevSeries) => prevSeries.filter((item) => item.id !== id));
+                            setSeries((prevSeries) => {
+                                const updated = prevSeries.filter((item) => item.id !== id);
+                                AsyncStorage.setItem(PULL_LIST_CACHE_KEY, JSON.stringify(updated)).catch(() => {});
+                                return updated;
+                            });
                         } catch (error) {
                             console.error('Error deleting series:', error);
                             showAlert('Error', 'Could not remove the series from your list.');
@@ -306,9 +325,9 @@ export default function Home() {
                 </Text>
                 <Text style={[
                     styles.nextIssueDate, { color: colors.primary, fontWeight: '600' }
-                ]}>
+                ]} numberOfLines={1}>
                     {dates[item.id]
-                        ? `${dates[item.id].label === 'next' ? 'Next' : 'Latest'}: ${new Date(dates[item.id].date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                        ? `${dates[item.id].label === 'next' ? 'Next' : 'Latest'}: ${dates[item.id].issueNumber ? `#${String(dates[item.id].issueNumber).replace(/^#/, '').trim()}: ` : ''}${new Date(dates[item.id].date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
                         : 'Next: —'}
                 </Text>
             </View>
@@ -349,8 +368,8 @@ export default function Home() {
                     extraData={nextIssueDates}
                     keyExtractor={keyExtractor}
                     numColumns={2}
-                    contentContainerStyle={{ padding: 10 }}
-                    columnWrapperStyle={{ justifyContent: 'space-between', paddingHorizontal: 5 }}
+                    contentContainerStyle={styles.listContent}
+                    columnWrapperStyle={styles.columnWrapper}
                     renderItem={renderItem}
                     initialNumToRender={6}
                     maxToRenderPerBatch={4}
@@ -366,6 +385,8 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
+    listContent: { padding: 10 },
+    columnWrapper: { justifyContent: 'space-between', paddingHorizontal: 5 },
     emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     emptyText: { color: Colors.textPrimary, fontSize: 18, fontWeight: 'bold', fontFamily: 'PlusJakartaSans_700Bold' },
     subText: { color: Colors.textSecondary, fontSize: 14, marginTop: 8, fontFamily: 'PlusJakartaSans_400Regular' },
@@ -376,20 +397,6 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         fontFamily: 'PlusJakartaSans_500Medium',
     },
-    latestIssueDate: {
-        color: Colors.warning,
-    },
-    fab: {
-        position: 'absolute',
-        bottom: 30,
-        right: 20,
-        backgroundColor: Colors.primary,
-        paddingVertical: 14,
-        paddingHorizontal: 20,
-        borderRadius: 30,
-        elevation: 5,
-    },
-    fabText: { color: 'white', fontWeight: 'bold', fontSize: 16, fontFamily: 'PlusJakartaSans_700Bold' },
     verificationBanner: {
         backgroundColor: '#2a2a1a',
         borderBottomWidth: 1,
