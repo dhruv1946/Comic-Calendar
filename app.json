@@ -2,7 +2,7 @@
   "expo": {
     "name": "Comic Calendar",
     "slug": "comic-calendar",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "comiccalendar",
@@ -21,7 +21,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anon.comiccalendar"
+      "package": "com.anon.comiccalendar",
+      "versionCode": 2
     },
     "web": {
       "output": "static",
