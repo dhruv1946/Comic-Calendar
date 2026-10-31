@@ -10,9 +10,9 @@ A sleek, modern comic book tracker and pull-list manager built with React Native
 [![React Native](https://img.shields.io/badge/React_Native-0.86-61DAFB?logo=react&logoColor=black)](https://reactnative.dev)
 [![Expo](https://img.shields.io/badge/Expo-SDK_57-000000?logo=expo&logoColor=white)](https://expo.dev)
 [![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white)](https://www.android.com/)
-[![Version](https://img.shields.io/badge/Release-v1.0.0-blueviolet)](https://github.com/dhruv1946/Comic-Calendar/releases/latest)
+[![Version](https://img.shields.io/badge/Release-v1.0.1-blueviolet)](https://github.com/dhruv1946/Comic-Calendar/releases/latest)
 
-[**Download APK (v1.0.0)**](https://github.com/dhruv1946/Comic-Calendar/releases/latest) | [**Features**](#features) | [**Tech Stack**](#tech-stack) | [**Getting Started**](#getting-started) | [**Building from Source**](#building-the-apk)
+[**Download APK (v1.0.1)**](https://github.com/dhruv1946/Comic-Calendar/releases/latest) | [**Features**](#features) | [**Tech Stack**](#tech-stack) | [**Getting Started**](#getting-started) | [**Building from Source**](#building-the-apk)
 
 </div>
 
@@ -52,10 +52,10 @@ A sleek, modern comic book tracker and pull-list manager built with React Native
 
 The standalone APK for Android is available under GitHub Releases:
 
-**[Download Comic Calendar v1.0.0 APK](https://github.com/dhruv1946/Comic-Calendar/releases/latest)**
+**[Download Comic Calendar v1.0.1 APK](https://github.com/dhruv1946/Comic-Calendar/releases/latest)**
 
 ### Installation:
-1. Download `Comic-Calendar-v1.0.0.apk` onto your Android device.
+1. Download `Comic-Calendar-v1.0.1.apk` onto your Android device.
 2. Follow on-device prompts to install the package.
 3. Open **Comic Calendar** and start building your pull list!
 
