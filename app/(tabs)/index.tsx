@@ -385,7 +385,7 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
-    listContent: { padding: 10 },
+    listContent: { padding: 10, paddingBottom: 120 },
     columnWrapper: { justifyContent: 'space-between', paddingHorizontal: 5 },
     emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     emptyText: { color: Colors.textPrimary, fontSize: 18, fontWeight: 'bold', fontFamily: 'PlusJakartaSans_700Bold' },

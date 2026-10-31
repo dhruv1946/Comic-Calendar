@@ -266,7 +266,7 @@ export default function Search() {
                 <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
             ) : showHistory ? (
                 /* ── Recent searches ── */
-                <ScrollView style={styles.historyContainer}>
+                <ScrollView style={styles.historyContainer} contentContainerStyle={{ paddingBottom: 120 }}>
                     <View style={styles.historyHeader}>
                         <Text style={[styles.historyTitle, { color: colors.onSurfaceVariant }]}>Recent Searches</Text>
                         <TouchableOpacity onPress={clearHistory}>
@@ -315,6 +315,7 @@ export default function Search() {
             ) : (
                 <FlatList
                     data={results}
+                    contentContainerStyle={{ paddingBottom: 120 }}
                     keyExtractor={(item) => item.id.toString()}
                     numColumns={2}
                     columnWrapperStyle={{ justifyContent: 'space-between', paddingHorizontal: 10 }}
