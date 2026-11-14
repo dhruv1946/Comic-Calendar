@@ -14,43 +14,44 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 const TARGET = 'metron.cloud';
 
-// ── Read credentials from .env ───────────────────────────────────────
-const envPath = path.join(__dirname, '..', '.env');
-let METRON_USER = '';
-let METRON_PASS = '';
+// ── Read credentials from environment or .env ─────────────────────────
+let METRON_USER = process.env.METRON_USER || '';
+let METRON_PASS = process.env.METRON_PASS || '';
 
-try {
-    const envContent = fs.readFileSync(envPath, 'utf8');
-    for (const line of envContent.split('\n')) {
-        const match = line.match(/^([A-Z_]+)=(.+)$/);
-        if (match) {
-            const [, key, value] = match;
-            if (key === 'METRON_USER') METRON_USER = value.trim();
-            if (key === 'METRON_PASS') METRON_PASS = value.trim();
+if (!METRON_USER || !METRON_PASS) {
+    const envPath = path.join(__dirname, '..', '.env');
+    try {
+        const envContent = fs.readFileSync(envPath, 'utf8');
+        for (const line of envContent.split('\n')) {
+            const match = line.match(/^([A-Z_]+)=(.+)$/);
+            if (match) {
+                const [, key, value] = match;
+                if (key === 'METRON_USER') METRON_USER = value.trim();
+                if (key === 'METRON_PASS') METRON_PASS = value.trim();
+            }
         }
+    } catch (err) {
+        // .env file missing or unreadable
     }
-} catch (err) {
-    console.error('[CORS Proxy] Could not read .env file:', err.message);
-    console.error('Create a .env file with METRON_USER and METRON_PASS.');
-    process.exit(1);
 }
 
 if (!METRON_USER || !METRON_PASS) {
-    console.error('[CORS Proxy] METRON_USER and METRON_PASS must be set in .env');
+    console.error('[CORS Proxy] METRON_USER and METRON_PASS must be set in process environment or .env');
     process.exit(1);
 }
 
 const METRON_AUTH = 'Basic ' + Buffer.from(`${METRON_USER}:${METRON_PASS}`).toString('base64');
 
-// Only allow requests from localhost / 127.0.0.1 / private IPs (any port)
+// Allow requests from localhost / 127.0.0.1 / private IPs, or custom ALLOWED_ORIGIN
 const ALLOWED_ORIGIN_REGEX = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/;
+const CUSTOM_ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '';
 
 const server = http.createServer((req, res) => {
     const origin = req.headers.origin;
-    const isAllowedOrigin = origin && ALLOWED_ORIGIN_REGEX.test(origin);
+    const isAllowedOrigin = origin && (ALLOWED_ORIGIN_REGEX.test(origin) || (CUSTOM_ALLOWED_ORIGIN && (CUSTOM_ALLOWED_ORIGIN === '*' || origin === CUSTOM_ALLOWED_ORIGIN)));
 
     // Native apps don't send an Origin header — allow them through
     const isNativeRequest = !origin;
