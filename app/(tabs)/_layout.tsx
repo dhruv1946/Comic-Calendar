@@ -1,5 +1,4 @@
 import { Tabs, Link } from 'expo-router';
-import React from 'react';
 import { View, Text, TouchableOpacity, Platform, StyleSheet } from 'react-native';
 import Animated, { LinearTransition, FadeIn, FadeOut } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,7 +9,7 @@ import { auth } from '../../firebase';
 
 const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
 
-function CustomTabBar({ state, descriptors, navigation, colors }: BottomTabBarProps & { colors: any }) {
+function CustomTabBar({ state, navigation, colors }: BottomTabBarProps & { colors: any }) {
     return (
         <View style={styles.tabBarWrapper}>
             <View style={[styles.tabBar, { backgroundColor: colors.surfaceContainerHigh || '#2a2a2a' }]}>
@@ -21,10 +20,18 @@ function CustomTabBar({ state, descriptors, navigation, colors }: BottomTabBarPr
                         if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
                     };
 
-                    const iconName = route.name === 'index'
-                        ? (isFocused ? 'home' : 'home-outline')
-                        : (isFocused ? 'search' : 'search-outline');
-                    const label = route.name === 'index' ? 'Home' : 'Search';
+                    let iconName: string;
+                    let label: string;
+                    if (route.name === 'index') {
+                        iconName = isFocused ? 'home' : 'home-outline';
+                        label = 'Home';
+                    } else if (route.name === 'today') {
+                        iconName = isFocused ? 'calendar' : 'calendar-outline';
+                        label = "Today's Releases";
+                    } else {
+                        iconName = isFocused ? 'search' : 'search-outline';
+                        label = 'Search';
+                    }
 
                     return (
                         <AnimatedTouchable
@@ -80,7 +87,7 @@ export default function TabLayout() {
             <Tabs.Screen
                 name="index"
                 options={{
-                    title: 'Pull List',
+                    title: 'Home',
                     headerRight: () => (
                         <Link href="/profile" asChild>
                             <TouchableOpacity style={{ marginRight: 15 }}>
@@ -92,6 +99,12 @@ export default function TabLayout() {
                             </TouchableOpacity>
                         </Link>
                     ),
+                }}
+            />
+            <Tabs.Screen
+                name="today"
+                options={{
+                    title: "Today's Releases",
                 }}
             />
             <Tabs.Screen
@@ -125,7 +138,7 @@ const styles = StyleSheet.create({
         paddingVertical: 6,
         alignItems: 'center',
         justifyContent: 'center',
-        width: 240,
+        width: 360,
     },
     tabItem: {
         flexDirection: 'row',

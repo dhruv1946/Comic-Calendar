@@ -2,7 +2,7 @@
   "expo": {
     "name": "Comic Calendar",
     "slug": "comic-calendar",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "comiccalendar",
@@ -22,7 +22,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.anon.comiccalendar",
-      "versionCode": 2
+      "versionCode": 3
     },
     "web": {
       "output": "static",

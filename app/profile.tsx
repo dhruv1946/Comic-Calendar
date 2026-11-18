@@ -1,19 +1,21 @@
-import { Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
 import { signOut, updateProfile } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ScrollView } from 'react-native';
-import { Colors, SharedStyles } from '../constants/styles';
+import { SharedStyles } from '../constants/styles';
 import { scheduleReleaseNotifications } from '../constants/notifications';
+import { usePullList } from '../constants/PullListContext';
+import { validateName } from '../constants/validation';
 import { useAppTheme, ThemePreference, ColorMode, PREVIEW_COLORS } from '../hooks/useTheme';
 import { useThemedAlert } from '../components/ThemedAlertProvider';
 import { Ionicons } from '@expo/vector-icons';
-import { auth, db } from '../firebase';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { auth } from '../firebase';
 
 export default function Profile() {
     const { preference, setPreference, colorMode, setColorMode, colors } = useAppTheme();
+    const { series, nextIssueDates } = usePullList();
     const [name, setName] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -23,8 +25,6 @@ export default function Profile() {
     const [showPicker, setShowPicker] = useState(false);
     
     const { showAlert } = useThemedAlert();
-
-    const router = useRouter();
 
     useEffect(() => {
         loadProfile();
@@ -59,31 +59,35 @@ export default function Profile() {
         const user = auth.currentUser;
         if (!user) return;
 
+        // SEC-3: Validate name before saving (same rules as signup)
+        const nameCheck = validateName(name);
+        if (!nameCheck.valid) {
+            showAlert('Invalid Name', nameCheck.message);
+            return;
+        }
+
         setSaving(true);
         try {
             await updateProfile(user, { displayName: name.trim() });
             
-            // Persist Themes
-            await AsyncStorage.setItem('theme_preference', preference);
-            await AsyncStorage.setItem('color_mode', colorMode);
+            // Persist Themes & Notifications
+            await AsyncStorage.multiSet([
+                ['theme_preference', preference],
+                ['color_mode', colorMode],
+                ['notificationTime', notificationTime.toISOString()],
+            ]);
 
-            // Persist Notifications
-            await AsyncStorage.setItem('notificationTime', notificationTime.toISOString());
-            const seriesQuery = query(collection(db, 'series'), where('user_id', '==', user.uid));
-            const snapshot = await getDocs(seriesQuery);
-            const pullList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-            
-            const rawDates = await AsyncStorage.getItem('comic_calendar_issue_dates_v2');
-            const datesMap = rawDates ? JSON.parse(rawDates).data : {};
-            
-            await scheduleReleaseNotifications(pullList, datesMap, { 
-                hours: notificationTime.getHours(), 
-                minutes: notificationTime.getMinutes() 
+            // Reschedule notifications using in-memory PullListContext data
+            await scheduleReleaseNotifications(series, nextIssueDates, {
+                hours: notificationTime.getHours(),
+                minutes: notificationTime.getMinutes(),
             });
 
             showAlert('Success', 'All changes saved!');
         } catch (error: any) {
-            showAlert('Error', error.message);
+            // SEC-7: Don't leak raw error details to user
+            console.error('Profile save error:', error);
+            showAlert('Error', 'Could not save changes. Please try again.');
         }
         setSaving(false);
     }
@@ -97,7 +101,7 @@ export default function Profile() {
     }
 
     if (loading) {
-        return <View style={SharedStyles.centeredContainer}><ActivityIndicator size="large" color={Colors.primary} /></View>;
+        return <View style={[SharedStyles.centeredContainer, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
     }
 
     return (
@@ -269,23 +273,21 @@ export default function Profile() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: Colors.background },
+    container: { flex: 1 },
     infoSection: { width: '100%', alignItems: 'center', marginTop: 40, marginBottom: 40 },
     avatarCircle: {
         width: 120,
         height: 120,
         borderRadius: 60,
-        backgroundColor: Colors.primary,
         justifyContent: 'center',
         alignItems: 'center',
         borderWidth: 2,
-        borderColor: Colors.border,
     },
-    avatarInitial: { color: '#fff', fontSize: 48, fontWeight: 'bold', fontFamily: 'PlusJakartaSans_700Bold' },
-    emailText: { color: Colors.textSecondary, fontSize: 14, marginTop: 12, fontFamily: 'PlusJakartaSans_400Regular' },
+    avatarInitial: { fontSize: 48, fontWeight: 'bold', fontFamily: 'PlusJakartaSans_700Bold' },
+    emailText: { fontSize: 14, marginTop: 12, fontFamily: 'PlusJakartaSans_400Regular' },
     inputSection: { gap: 10 },
-    pickerContainer: { alignItems: 'center', backgroundColor: Colors.surface, borderRadius: 8, overflow: 'hidden' },
-    label: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600', marginLeft: 4, fontFamily: 'PlusJakartaSans_700Bold' },
-    logoutButton: { marginTop: 20, marginBottom: 20, padding: 16, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: Colors.primary },
-    logoutText: { color: Colors.primary, fontWeight: 'normal', fontSize: 16, fontFamily: 'SpaceGrotesk_700Bold' },
+    pickerContainer: { alignItems: 'center', borderRadius: 8, overflow: 'hidden' },
+    label: { fontSize: 14, fontWeight: '600', marginLeft: 4, fontFamily: 'PlusJakartaSans_700Bold' },
+    logoutButton: { marginTop: 20, marginBottom: 20, padding: 16, borderRadius: 8, alignItems: 'center', borderWidth: 1 },
+    logoutText: { fontWeight: 'normal', fontSize: 16, fontFamily: 'SpaceGrotesk_700Bold' },
 });

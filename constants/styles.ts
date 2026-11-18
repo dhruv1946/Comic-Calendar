@@ -12,7 +12,6 @@ export const Colors = {
     surfaceAlt: '#2a2a2a',
     border: '#333',
     primary: '#ff4757',
-    warning: '#ffa502',
     textPrimary: '#ffffff',
     textSecondary: '#888888',
     textMuted: '#444',

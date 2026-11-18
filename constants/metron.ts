@@ -19,20 +19,26 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { Config } from './config';
 
-const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_TIMEOUT_MS = 20000;
 const BATCH_DELAY_MS = 1500; // 1.5s between requests — be gentle
+
+/** Local YYYY-MM-DD — flips at midnight in the user's timezone, not UTC. */
+export function getLocalDateString(): string {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 // ── Proxy URL resolution ──
 // All platforms route through the proxy (scripts/cors-proxy.js or deployed remote proxy).
 // The proxy injects Metron credentials server-side — the client sends zero secrets.
 const PROXY_PORT = 3001;
-const DEV_LAN_IP = '192.168.1.100'; // Development machine Wi-Fi IP
+const DEV_LAN_IP = '192.168.1.100'; // Development machine Wi-Fi IP (only used in __DEV__)
 const PROXY_STORAGE_KEY = '@comic_cal_proxy_base_url';
 
 let activeBaseUrl: string | null = null;
 let resolvePromise: Promise<string> | null = null;
 
-export async function getProxyBaseUrl(): Promise<string> {
+async function getProxyBaseUrl(): Promise<string> {
     if (activeBaseUrl) return activeBaseUrl;
     if (resolvePromise) return resolvePromise;
 
@@ -84,11 +90,15 @@ export async function getProxyBaseUrl(): Promise<string> {
         candidates.push(`http://127.0.0.1:${PROXY_PORT}/api`);
         candidates.push(`http://localhost:${PROXY_PORT}/api`);
 
-        // 3. Dev machine LAN IP (works over Wi-Fi on physical device)
-        candidates.push(`http://${DEV_LAN_IP}:${PROXY_PORT}/api`);
+        // 3. Dev machine LAN IP (works over Wi-Fi on physical device) — only in dev
+        if (__DEV__) {
+            candidates.push(`http://${DEV_LAN_IP}:${PROXY_PORT}/api`);
+        }
 
-        // 4. Android Emulator loopback alias
-        candidates.push(`http://10.0.2.2:${PROXY_PORT}/api`);
+        // 4. Android Emulator loopback alias — only in dev
+        if (__DEV__) {
+            candidates.push(`http://10.0.2.2:${PROXY_PORT}/api`);
+        }
 
         if (activeBaseUrl && !candidates.includes(activeBaseUrl)) {
             candidates.unshift(activeBaseUrl);
@@ -102,7 +112,6 @@ export async function getProxyBaseUrl(): Promise<string> {
             const timer = setTimeout(() => controller.abort(), 1800);
             try {
                 const res = await fetch(`${url}/health`, { signal: controller.signal });
-                clearTimeout(timer);
                 if (res.ok) return url;
             } catch {
                 // Not reachable on this address
@@ -131,12 +140,13 @@ export async function getProxyBaseUrl(): Promise<string> {
 
 // ── Cache TTLs ──
 const COVER_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;  // 7 days (covers rarely change)
+const CURRENT_COVER_CACHE_TTL = 24 * 60 * 60 * 1000; // 1 day (current issue covers change weekly)
 const DATE_CACHE_TTL = 6 * 60 * 60 * 1000;         // 6 hours (dates update weekly)
 const SEARCH_CACHE_TTL = 30 * 60 * 1000;            // 30 min (search results)
 
 // ── In-memory caches (bounded to prevent unbounded growth) ──
 const MAX_MEM_CACHE_ENTRIES = 200;
-const memCoverCache = new Map<number, { url: string | null; ts: number }>();
+const memCoverCache = new Map<string, { url: string | null; ts: number }>();
 const memDateCache = new Map<number, { data: any; ts: number }>();
 const memSearchCache = new Map<string, { results: any[]; ts: number }>();
 
@@ -177,7 +187,7 @@ async function setCache(key: string, data: any): Promise<void> {
  * Core fetch — routes through the proxy, respects rate limits, never retries 429.
  * No credentials are sent from the client — the proxy injects them server-side.
  */
-export async function metronFetch(path: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
+async function metronFetch(path: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
     // If we're rate-limited, wait or fail
     const now = Date.now();
     if (now < rateLimitPausedUntil) {
@@ -196,13 +206,18 @@ export async function metronFetch(path: string, timeoutMs = DEFAULT_TIMEOUT_MS):
         await delay(3000);
     }
 
+    const baseUrl = await getProxyBaseUrl();
+
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-        const baseUrl = await getProxyBaseUrl();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (Config.PROXY_KEY) {
+            headers['X-Proxy-Key'] = Config.PROXY_KEY;
+        }
         const response = await fetch(`${baseUrl}${path}`, {
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             signal: controller.signal,
         });
         clearTimeout(id);
@@ -229,7 +244,7 @@ export async function metronFetch(path: string, timeoutMs = DEFAULT_TIMEOUT_MS):
         return response;
     } catch (error: any) {
         clearTimeout(id);
-        if (error.name === 'AbortError') {
+        if (error.name === 'AbortError' || error.message?.includes('canceled')) {
             throw new Error('Request timed out.');
         }
         throw error;
@@ -240,7 +255,7 @@ export async function metronFetch(path: string, timeoutMs = DEFAULT_TIMEOUT_MS):
  * Series types worth tracking (ongoing + limited).
  * Excludes: One-Shot, Annual, Graphic Novel, Hardcover, TPB, Omnibus, Digital Chapter.
  */
-export const TRACKABLE_TYPE_IDS = [13, 11] as const; // Single Issue, Limited Series
+const TRACKABLE_TYPE_IDS = [13, 11] as const; // Single Issue, Limited Series
 
 /**
  * Search series by name. Searches for both Single Issue (13) and
@@ -306,35 +321,57 @@ async function fetchSeriesByType(name: string, seriesTypeId: number): Promise<an
 }
 
 /**
- * Fetch cover image URL for issue #1 of a series.
- * Cached to disk for 7 days.
+ * Shared helper to fetch & cache a cover image URL for a given series and issue number.
  */
-export async function fetchIssueCover(seriesMetronId: number): Promise<string | null> {
-    // Memory cache
-    const memEntry = memCoverCache.get(seriesMetronId);
-    if (memEntry && Date.now() - memEntry.ts < COVER_CACHE_TTL) {
+async function fetchCoverImage(
+    seriesMetronId: number,
+    issueNumber: string,
+    diskKey: string,
+    ttl: number,
+): Promise<string | null> {
+    const memEntry = memCoverCache.get(diskKey);
+    if (memEntry && Date.now() - memEntry.ts < ttl) {
         return memEntry.url;
     }
 
-    // Disk cache
-    const diskKey = `metron_cover_${seriesMetronId}`;
     const diskEntry = await getCached<string | null>(diskKey);
-    if (diskEntry && Date.now() - diskEntry.ts < COVER_CACHE_TTL) {
-        setBoundedCache(memCoverCache, seriesMetronId, { url: diskEntry.data, ts: diskEntry.ts });
+    if (diskEntry && Date.now() - diskEntry.ts < ttl) {
+        setBoundedCache(memCoverCache, diskKey, { url: diskEntry.data, ts: diskEntry.ts });
         return diskEntry.data;
     }
 
-    // Fetch from API
     try {
-        const resp = await metronFetch(`/issue/?series_id=${seriesMetronId}&number=1`);
+        const resp = await metronFetch(`/issue/?series_id=${seriesMetronId}&number=${encodeURIComponent(issueNumber)}`);
         const json = await resp.json();
         const url = json.results?.[0]?.image || null;
-        setBoundedCache(memCoverCache, seriesMetronId, { url, ts: Date.now() });
+        setBoundedCache(memCoverCache, diskKey, { url, ts: Date.now() });
         await setCache(diskKey, url);
         return url;
     } catch {
         return null;
     }
+}
+
+/**
+ * Fetch cover image URL for issue #1 of a series. Cached for 7 days.
+ */
+export function fetchIssueCover(seriesMetronId: number): Promise<string | null> {
+    return fetchCoverImage(seriesMetronId, '1', `metron_cover_${seriesMetronId}`, COVER_CACHE_TTL);
+}
+
+/**
+ * Fetch cover image URL for a specific issue of a series. Cached for 1 day.
+ */
+export function fetchCurrentIssueCover(
+    seriesMetronId: number,
+    issueNumber: string,
+): Promise<string | null> {
+    return fetchCoverImage(
+        seriesMetronId,
+        issueNumber,
+        `metron_current_cover_${seriesMetronId}_${issueNumber}`,
+        CURRENT_COVER_CACHE_TTL,
+    );
 }
 
 /**
@@ -345,8 +382,8 @@ function isDateCacheFresh(entry: { data: any; ts: number }): boolean {
     if (Date.now() - entry.ts >= DATE_CACHE_TTL) return false;
     // If the cached 'next' date is in the past, data is stale
     if (entry.data?.label === 'next' && entry.data?.date) {
-        const today = new Date().toISOString().split('T')[0];
-        if (entry.data.date <= today) return false;
+        const today = getLocalDateString();
+        if (entry.data.date < today) return false;
     }
     return true;
 }
@@ -372,7 +409,7 @@ export async function fetchIssueDate(
         return diskEntry.data;
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateString();
 
     try {
         const resp = await metronFetch(`/issue/?series_id=${seriesMetronId}`);
@@ -387,7 +424,7 @@ export async function fetchIssueDate(
         for (const issue of issues) {
             const d = issue.store_date;
             if (!d) continue;
-            if (d > today) {
+            if (d >= today) {
                 if (!nextIssue || d < nextIssue.store_date) nextIssue = issue;
             } else {
                 if (!latestIssue || d > latestIssue.store_date) latestIssue = issue;
@@ -413,9 +450,9 @@ export async function fetchIssueDate(
 /**
  * Clear cached date data for a specific series — forces a fresh API fetch.
  */
-export function clearDateCache(seriesMetronId: number): void {
+export async function clearDateCache(seriesMetronId: number): Promise<void> {
     memDateCache.delete(seriesMetronId);
-    AsyncStorage.removeItem(`metron_date_${seriesMetronId}`).catch(() => {});
+    await AsyncStorage.removeItem(`metron_date_${seriesMetronId}`).catch(() => {});
 }
 
 /**

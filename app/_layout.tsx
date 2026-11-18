@@ -7,6 +7,7 @@ import { auth } from '../firebase';
 import { requestNotificationPermissions } from '../constants/notifications';
 import { ThemeProvider, useAppTheme } from '../hooks/useTheme';
 import { ThemedAlertProvider } from '../components/ThemedAlertProvider';
+import { PullListProvider } from '../constants/PullListContext';
 import { useFonts, Syne_700Bold } from '@expo-google-fonts/syne';
 import { SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk';
 import { PlusJakartaSans_400Regular, PlusJakartaSans_500Medium, PlusJakartaSans_700Bold } from '@expo-google-fonts/plus-jakarta-sans';
@@ -42,6 +43,7 @@ function RootLayoutNav({ initialRoute }: { initialRoute: string }) {
     const { colors } = useAppTheme();
     return (
         <ThemedAlertProvider>
+            <PullListProvider>
             <Stack
                 initialRouteName={initialRoute}
                 screenOptions={{
@@ -55,6 +57,7 @@ function RootLayoutNav({ initialRoute }: { initialRoute: string }) {
                 <Stack.Screen name="signup" options={{ headerShown: false }} />
                 <Stack.Screen name="profile" options={{ title: 'Your Profile', presentation: 'modal' }} />
             </Stack>
+            </PullListProvider>
         </ThemedAlertProvider>
     );
 }

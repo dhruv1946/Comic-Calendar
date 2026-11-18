@@ -1,9 +1,9 @@
 import { useRouter } from 'expo-router';
 import { createUserWithEmailAndPassword, sendEmailVerification, updateProfile } from 'firebase/auth';
-import React, { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { getFirebaseErrorMessage } from '../constants/firebaseErrors';
-import { Colors, SharedStyles } from '../constants/styles';
+import { SharedStyles } from '../constants/styles';
 import { validateEmail, validateName, validatePassword } from '../constants/validation';
 import { auth } from '../firebase';
 import { useAppTheme } from '../hooks/useTheme';

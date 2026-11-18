@@ -6,7 +6,7 @@ import { useColorScheme } from 'react-native';
 export type ThemePreference = 'system' | 'pine' | 'mocha' | 'obsidian' | 'navy' | 'coral' | 'forest' | 'teal' | 'indigo' | 'plum' | 'matcha' | 'noir';
 export type ColorMode = 'system' | 'light' | 'dark';
 
-export const PRESET_COLORS = {
+const PRESET_COLORS = {
     pine: '#2D5A27',      // Pine Green
     mocha: '#8B5A2B',     // Warm Brown
     obsidian: '#800000',  // Deep Crimson / Near Black
@@ -18,21 +18,6 @@ export const PRESET_COLORS = {
     plum: '#6A1B9A',      // Deep Plum
     matcha: '#4A5D23',    // Matcha Green
     noir: '#333333',      // Black and White
-};
-
-// These are just for the UI Swatches in the profile screen
-export const PREVIEW_COLORS: Record<string, { fg: string, bgDark: string, bgLight: string }> = {
-    pine: { fg: '#2D5A27', bgDark: '#0F1A12', bgLight: '#F4F2ED' },
-    mocha: { fg: '#8B5A2B', bgDark: '#241810', bgLight: '#F7EBE1' },
-    obsidian: { fg: '#800000', bgDark: '#160808', bgLight: '#F8E8E8' },
-    navy: { fg: '#000080', bgDark: '#080D1A', bgLight: '#E8EDF5' },
-    coral: { fg: '#FF7F50', bgDark: '#2A1610', bgLight: '#FDF1EB' },
-    forest: { fg: '#68BA7F', bgDark: '#253D2C', bgLight: '#E8F5E9' },
-    teal: { fg: '#00695C', bgDark: '#001D1A', bgLight: '#E0F2F1' },
-    indigo: { fg: '#283593', bgDark: '#1A1B26', bgLight: '#E8EAF6' },
-    plum: { fg: '#6A1B9A', bgDark: '#230E26', bgLight: '#F3E5F5' },
-    matcha: { fg: '#4A5D23', bgDark: '#1C261E', bgLight: '#F5F5DC' },
-    noir: { fg: '#333333', bgDark: '#000000', bgLight: '#FFFFFF' },
 };
 
 // Material 3 defaults are often too subtle (just grey/white). We forcibly inject these rich, themed backgrounds!
@@ -83,6 +68,19 @@ const THEME_OVERRIDES: Record<string, { light: any, dark: any }> = {
     },
 };
 
+// Derived swatches for the profile theme picker (single source of truth)
+export const PREVIEW_COLORS: Record<string, { fg: string; bgDark: string; bgLight: string }> =
+    Object.fromEntries(
+        (Object.keys(PRESET_COLORS) as (keyof typeof PRESET_COLORS)[]).map((key) => [
+            key,
+            {
+                fg: PRESET_COLORS[key],
+                bgDark: THEME_OVERRIDES[key].dark.background,
+                bgLight: THEME_OVERRIDES[key].light.background,
+            },
+        ]),
+    );
+
 interface ThemeContextType {
     preference: ThemePreference;
     setPreference: (pref: ThemePreference, save?: boolean) => void;
@@ -90,7 +88,6 @@ interface ThemeContextType {
     setColorMode: (mode: ColorMode, save?: boolean) => void;
     isDark: boolean;
     colors: ReturnType<typeof useMaterial3Theme>['theme']['dark'];
-    isDynamicSupported: boolean;
 }
 
 const ThemeContext = createContext<ThemeContextType | null>(null);
@@ -107,16 +104,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const { theme, updateTheme, resetTheme } = useMaterial3Theme({ fallbackSourceColor: PRESET_COLORS.pine });
     
     useEffect(() => {
-        // Load preference from storage
-        AsyncStorage.getItem('theme_preference').then((pref) => {
-            if (pref) {
-                setPreferenceState(pref as ThemePreference);
-            }
-        });
-        AsyncStorage.getItem('color_mode').then((mode) => {
-            if (mode) {
-                setColorModeState(mode as ColorMode);
-            }
+        // Load both preferences in a single I/O operation
+        AsyncStorage.multiGet(['theme_preference', 'color_mode']).then(([[, pref], [, mode]]) => {
+            if (pref) setPreferenceState(pref as ThemePreference);
+            if (mode) setColorModeState(mode as ColorMode);
         });
     }, []);
 
@@ -156,7 +147,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         setColorMode,
         isDark,
         colors: activeColors,
-        isDynamicSupported: true,
     };
 
     return (

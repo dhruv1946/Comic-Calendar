@@ -2,11 +2,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { addDoc, collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useThemedAlert } from '../../components/ThemedAlertProvider';
 import { batchParallel, fetchIssueCover, searchSeries } from '../../constants/metron';
-import { Colors, SharedStyles } from '../../constants/styles';
+import { SharedStyles } from '../../constants/styles';
 import { auth, db } from '../../firebase';
 import { useAppTheme } from '../../hooks/useTheme';
 
@@ -41,10 +41,6 @@ export default function Search() {
     const router = useRouter();
     const inputRef = useRef<TextInput>(null);
 
-    // Use a ref to always have the latest history in async callbacks
-    const historyRef = useRef<HistoryEntry[]>([]);
-    historyRef.current = history;
-
     // Debounce guard
     const lastSearchTime = useRef(0);
     const DEBOUNCE_MS = 1000;
@@ -65,7 +61,6 @@ export default function Search() {
 
     /**
      * Persist the top 3 results from a search into history.
-     * Uses historyRef so the closure always sees the latest data.
      */
     const saveToHistory = async (searchQuery: string, finalResults: SearchResult[]) => {
         try {
@@ -181,7 +176,7 @@ export default function Search() {
         }
     };
 
-    const addSeries = async (item: SearchResult | HistoryEntry['results'][0]) => {
+    const addSeries = useCallback(async (item: SearchResult | HistoryEntry['results'][0]) => {
         try {
             setLoading(true);
             const user = auth.currentUser;
@@ -222,7 +217,7 @@ export default function Search() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [showAlert, router]);
 
     const replaySearch = (historyQuery: string) => {
         setQueryText(historyQuery);
@@ -235,6 +230,33 @@ export default function Search() {
     };
 
     const showHistory = !hasSearched && !loading && results.length === 0 && history.length > 0;
+
+    const renderSearchItem = useCallback(({ item }: { item: SearchResult }) => (
+        <TouchableOpacity style={[SharedStyles.gridCard, { backgroundColor: colors.surfaceContainer }]} onPress={() => addSeries(item)}>
+            <View style={SharedStyles.imagePlaceholder}>
+                {item.image_url ? (
+                    <Image
+                        source={{ uri: item.image_url }}
+                        style={SharedStyles.coverImage}
+                        contentFit="cover"
+                        transition={200}
+                        cachePolicy="memory-disk"
+                        recyclingKey={`search-${item.id}`}
+                    />
+                ) : (
+                    <Text style={{ color: colors.onSurfaceVariant, fontFamily: 'PlusJakartaSans_400Regular' }}>No Cover</Text>
+                )}
+            </View>
+            <View style={[styles.cardTextContainer, { backgroundColor: colors.surfaceContainer }]}>
+                <Text style={[SharedStyles.gridTitle, { color: colors.onSurface }]} numberOfLines={2}>
+                    {item.name || 'Unknown'}
+                </Text>
+                <Text style={[styles.gridSubText, { color: colors.onSurfaceVariant }]}>{item.year_began}</Text>
+            </View>
+        </TouchableOpacity>
+    ), [colors, addSeries]);
+
+    const searchKeyExtractor = useCallback((item: SearchResult) => item.id.toString(), []);
 
     return (
         <View collapsable={false} style={[styles.container, { backgroundColor: colors.background }]}>
@@ -294,7 +316,7 @@ export default function Search() {
                                             {item.image_url ? (
                                                 <Image
                                                     source={{ uri: item.image_url }}
-                                                    style={{ width: '100%', height: '100%' }}
+                                                    style={SharedStyles.coverImage}
                                                     contentFit="cover"
                                                     transition={200}
                                                     cachePolicy="memory-disk"
@@ -316,36 +338,13 @@ export default function Search() {
                 <FlatList
                     data={results}
                     contentContainerStyle={{ paddingBottom: 120 }}
-                    keyExtractor={(item) => item.id.toString()}
+                    keyExtractor={searchKeyExtractor}
                     numColumns={2}
                     columnWrapperStyle={{ justifyContent: 'space-between', paddingHorizontal: 10 }}
-                    renderItem={({ item }) => (
-                        <TouchableOpacity style={[SharedStyles.gridCard, { backgroundColor: colors.surfaceContainer }]} onPress={() => addSeries(item)}>
-                            <View style={SharedStyles.imagePlaceholder}>
-                                {item.image_url ? (
-                                    <Image
-                                        source={{ uri: item.image_url }}
-                                        style={{ width: '100%', height: '100%' }}
-                                        contentFit="cover"
-                                        transition={200}
-                                        cachePolicy="memory-disk"
-                                        recyclingKey={`search-${item.id}`}
-                                    />
-                                ) : (
-                                    <Text style={{ color: colors.onSurfaceVariant, fontFamily: 'PlusJakartaSans_400Regular' }}>No Cover</Text>
-                                )}
-                            </View>
-                            <View style={[styles.cardTextContainer, { backgroundColor: colors.surfaceContainer }]}>
-                                <Text style={[SharedStyles.gridTitle, { color: colors.onSurface }]} numberOfLines={2}>
-                                    {item.name || 'Unknown'}
-                                </Text>
-                                <Text style={[styles.gridSubText, { color: colors.onSurfaceVariant }]}>{item.year_began}</Text>
-                            </View>
-                        </TouchableOpacity>
-                    )}
+                    renderItem={renderSearchItem}
                     ListEmptyComponent={
                         hasSearched ? (
-                            <Text style={styles.emptyText}>No results found.</Text>
+                            <Text style={[styles.emptyText, { color: colors.onSurfaceVariant }]}>No results found.</Text>
                         ) : null
                     }
                 />
@@ -355,18 +354,15 @@ export default function Search() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: Colors.background, padding: 10 },
+    container: { flex: 1, padding: 10 },
     searchHeader: { flexDirection: 'row', gap: 10, marginBottom: 20, paddingHorizontal: 5 },
     inputWrapper: { flex: 1, position: 'relative', justifyContent: 'center' },
     input: {
-        backgroundColor: Colors.surface,
-        color: Colors.textPrimary,
         paddingHorizontal: 15,
         paddingVertical: 12,
         paddingRight: 40,
         borderRadius: 8,
         borderWidth: 1,
-        borderColor: Colors.border,
     },
     clearBtn: {
         position: 'absolute',
@@ -374,20 +370,18 @@ const styles = StyleSheet.create({
         width: 22,
         height: 22,
         borderRadius: 11,
-        backgroundColor: Colors.surfaceAlt,
         justifyContent: 'center',
         alignItems: 'center',
     },
-    clearBtnText: { color: Colors.textSecondary, fontSize: 12, fontWeight: 'bold', fontFamily: 'PlusJakartaSans_700Bold' },
+    clearBtnText: { fontSize: 12, fontWeight: 'bold', fontFamily: 'PlusJakartaSans_700Bold' },
     searchBtn: {
-        backgroundColor: Colors.primary,
         justifyContent: 'center',
         paddingHorizontal: 20,
         borderRadius: 8,
     },
-    cardTextContainer: { flex: 1, padding: 10, minHeight: 70, backgroundColor: Colors.surface },
-    gridSubText: { color: Colors.textSecondary, fontSize: 11, marginTop: 4, fontFamily: 'PlusJakartaSans_400Regular' },
-    emptyText: { color: Colors.textSecondary, textAlign: 'center', marginTop: 40, fontFamily: 'PlusJakartaSans_400Regular' },
+    cardTextContainer: { flex: 1, padding: 10, minHeight: 70 },
+    gridSubText: { fontSize: 11, marginTop: 4, fontFamily: 'PlusJakartaSans_400Regular' },
+    emptyText: { textAlign: 'center', marginTop: 40, fontFamily: 'PlusJakartaSans_400Regular' },
 
     // ── History ──
     historyContainer: { flex: 1, paddingHorizontal: 5 },
@@ -398,7 +392,6 @@ const styles = StyleSheet.create({
         marginBottom: 16,
     },
     historyTitle: {
-        color: Colors.textSecondary,
         fontSize: 13,
         fontWeight: '600',
         fontFamily: 'PlusJakartaSans_700Bold',
@@ -406,7 +399,6 @@ const styles = StyleSheet.create({
         letterSpacing: 1,
     },
     clearHistoryText: {
-        color: Colors.primary,
         fontSize: 13,
         fontWeight: '600',
         fontFamily: 'PlusJakartaSans_700Bold',
@@ -418,9 +410,8 @@ const styles = StyleSheet.create({
         gap: 8,
         marginBottom: 10,
     },
-    historyIcon: { fontSize: 14 },
-    historyQueryText: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1, fontFamily: 'PlusJakartaSans_700Bold' },
-    historyArrow: { color: Colors.textSecondary, fontSize: 16 },
+    historyQueryText: { fontSize: 15, fontWeight: '600', flex: 1, fontFamily: 'PlusJakartaSans_700Bold' },
+    historyArrow: { fontSize: 16 },
     historyCardsRow: {
         flexDirection: 'row',
         gap: 10,
@@ -429,17 +420,14 @@ const styles = StyleSheet.create({
         width: 110,
         borderRadius: 10,
         overflow: 'hidden',
-        backgroundColor: Colors.surface,
     },
     historyImage: {
         width: 110,
         height: 160,
-        backgroundColor: Colors.surfaceAlt,
         justifyContent: 'center',
         alignItems: 'center',
     },
     historyItemName: {
-        color: Colors.textPrimary,
         fontSize: 11,
         fontWeight: '600',
         fontFamily: 'PlusJakartaSans_700Bold',
